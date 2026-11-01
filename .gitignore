@@ -1,0 +1,28 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest-data/
+
+# Build output
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log
+
+# Secrets: the Termix export holds plain private keys + passwords, never commit
+*.sqlite
+*.sqlite3
+*.db
+*.sshpro
+.env
+data/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

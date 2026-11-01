@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SSH Pro AI</title>
+  <link rel="icon" href="/static/icon.png">
+  <link rel="stylesheet" href="/static/vendor/xterm.css">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="app">
+  <!-- ============ Sidebar ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo"><svg viewBox="0 0 24 24"><polyline points="5 16 10 11 5 6"/><line x1="12" y1="18" x2="19" y2="18"/></svg></div>
+      <div class="brand-text">
+        <div class="brand-name">SSH Pro <span class="grad">AI</span></div>
+        <div class="brand-sub" id="brandSub">fleet control · AGY brain</div>
+      </div>
+    </div>
+
+    <div class="search">
+      <span class="i" data-icon="search"></span>
+      <input id="search" placeholder="Search servers…" autocomplete="off" spellcheck="false">
+      <kbd>Ctrl K</kbd>
+    </div>
+
+    <div class="side-actions">
+      <button class="btn btn-primary btn-sm grow" id="btnAdd"><span class="i" data-icon="plus"></span>Add server</button>
+      <button class="btn btn-ghost btn-icon" id="btnRefresh" title="Re-check all servers"><span class="i" data-icon="refresh"></span></button>
+    </div>
+
+    <div class="server-list" id="serverList"></div>
+
+    <div class="side-footer">
+      <div class="selection" id="selectionBar" hidden>
+        <span id="selectionText"></span>
+        <button class="link" id="btnOpenSelected">Open terminals</button>
+        <button class="link muted" id="btnClearSel">Clear</button>
+      </div>
+      <div class="side-foot-row">
+        <button class="btn btn-ghost btn-sm" id="btnImport" title="Import from Termix ssh.sqlite"><span class="i" data-icon="import"></span>Import</button>
+        <button class="btn btn-ghost btn-sm" id="btnBackup" title="Export or restore a backup"><span class="i" data-icon="shield"></span>Backup</button>
+        <button class="btn btn-ghost btn-sm" id="btnAudit"><span class="i" data-icon="history"></span>Audit log</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ Main ============ -->
+  <main class="main">
+    <header class="topbar">
+      <nav class="tabs" id="tabs">
+        <button class="tab" data-view="overview"><span class="i" data-icon="activity"></span>Overview</button>
+        <button class="tab" data-view="ai"><span class="i" data-icon="sparkles"></span>AI Ops</button>
+        <div class="tab-sep"></div>
+        <div class="term-tabs" id="termTabs"></div>
+      </nav>
+      <div class="top-actions" id="termActions" hidden>
+        <button class="btn btn-ghost btn-sm" id="btnTile" title="Show all terminals side by side"><span class="i" data-icon="grid"></span>Tile</button>
+        <button class="btn btn-ghost btn-sm" id="btnBroadcast" title="Type once, send to every open terminal"><span class="i" data-icon="broadcast"></span>Broadcast</button>
+      </div>
+    </header>
+
+    <!-- Overview -->
+    <section class="view" id="view-overview">
+      <div class="view-scroll">
+        <div class="page-head">
+          <div>
+            <h1>Fleet overview</h1>
+            <p class="sub" id="ovSub">Live health of every server</p>
+          </div>
+          <div class="chips" id="folderChips"></div>
+        </div>
+        <div class="stats" id="stats"></div>
+        <div class="cards" id="cards"></div>
+      </div>
+    </section>
+
+    <!-- AI Ops -->
+    <section class="view" id="view-ai">
+      <div class="ai-head">
+        <div class="seg" id="modeSeg">
+          <button data-mode="ai" class="on"><span class="i" data-icon="sparkles"></span>AI</button>
+          <button data-mode="direct"><span class="i" data-icon="terminal"></span>Direct</button>
+        </div>
+        <div class="target">
+          <span class="target-label">Target</span>
+          <div class="chips tchips" id="targetChips"></div>
+          <select id="targetSel" title="Target one server"></select>
+          <span class="target-info" id="targetInfo"></span>
+        </div>
+        <div class="grow"></div>
+        <span class="model-pill" id="modelPill" title="AI model (list comes live from `agy models`)"><span class="pulse"></span><span id="modelName">AGY</span><select id="modelSel" hidden></select></span>
+        <button class="btn btn-ghost btn-sm" id="btnHistory" title="Earlier chats"><span class="i" data-icon="history"></span>History</button>
+        <button class="btn btn-ghost btn-sm" id="btnNewChat" title="Start a fresh AI conversation"><span class="i" data-icon="plus"></span>New chat</button>
+      </div>
+      <div class="chat" id="chat">
+        <div class="chat-inner" id="chatInner">
+          <div class="empty" id="chatEmpty">
+            <div class="empty-orb"><span class="i" data-icon="sparkles"></span></div>
+            <h2>Ask anything about your fleet</h2>
+            <p>AGY plans the commands, SSH Pro AI runs them on every target server in parallel and brings back one clear answer. Anything that changes a server waits for your approval.</p>
+            <div class="suggest" id="suggest"></div>
+          </div>
+          <div class="agy-missing" id="agyMissing" hidden>
+            <div class="agy-missing-head"><span class="i" data-icon="sparkles"></span><h3>AI chat needs the AGY CLI</h3></div>
+            <p>The AI chat runs on the Antigravity CLI (<code>agy</code>) installed on this computer, and it was not found. Everything else works without it: servers, terminals and <b>Direct</b> mode commands.</p>
+            <ol>
+              <li>Install it — PowerShell: <code>irm https://antigravity.google/install.ps1 | iex</code> &nbsp;or&nbsp; <code>winget install Google.AntigravityCLI</code></li>
+              <li>Open a new terminal, run <code>agy</code> once and sign in</li>
+              <li>Restart SSH Pro AI</li>
+            </ol>
+            <button class="btn btn-sm" id="agyInstallLink"><span class="i" data-icon="link"></span>Open install guide</button>
+          </div>
+        </div>
+      </div>
+      <div class="composer-wrap">
+        <div class="composer" id="composer">
+          <textarea id="prompt" rows="1" placeholder="e.g. check free disk space on all servers"></textarea>
+          <button class="btn btn-stop" id="btnStop" hidden title="Stop"><span class="i" data-icon="stop"></span></button>
+          <button class="btn btn-send" id="btnSend" title="Send (Enter)"><span class="i" data-icon="send"></span></button>
+        </div>
+        <div class="composer-hint" id="composerHint">Enter to send · Shift+Enter for a new line</div>
+      </div>
+    </section>
+
+    <!-- Terminals -->
+    <section class="view" id="view-terms">
+      <div class="broadcast-banner" id="bcBanner" hidden>
+        <span class="i" data-icon="broadcast"></span>
+        <span>Broadcast is ON — keystrokes go to <b id="bcCount">0</b> terminals</span>
+        <button class="link" id="bcOff">Turn off</button>
+      </div>
+      <div class="terms" id="terms"></div>
+    </section>
+  </main>
+</div>
+
+<!-- Server modal -->
+<div class="modal-back" id="serverModal" hidden>
+  <form class="modal" id="serverForm" autocomplete="off">
+    <div class="modal-head">
+      <div>
+        <h3 id="smTitle">Add server</h3>
+        <p class="sub">Secrets are encrypted with Windows DPAPI on this PC.</p>
+      </div>
+      <button type="button" class="btn btn-ghost btn-icon" data-close><span class="i" data-icon="x"></span></button>
+    </div>
+    <div class="modal-body">
+      <div class="grid2">
+        <label class="field"><span>Name</span><input name="name" placeholder="production-api"></label>
+        <label class="field"><span>Folder</span><input name="folder" list="folderList" placeholder="Clients"></label>
+        <label class="field span2 hostrow">
+          <span>Host &amp; port</span>
+          <div class="inline"><input name="host" placeholder="203.0.113.10 or host.example.com" required><input name="port" type="number" value="22" min="1" max="65535" class="port"></div>
+        </label>
+        <label class="field"><span>Username</span><input name="username" placeholder="root" required></label>
+        <label class="field"><span>Tags</span><input name="tags" placeholder="web, php, node"></label>
+      </div>
+      <div class="field">
+        <span>Authentication</span>
+        <div class="seg seg-full" id="authSeg">
+          <button type="button" data-auth="key" class="on"><span class="i" data-icon="key"></span>Private key</button>
+          <button type="button" data-auth="password"><span class="i" data-icon="shield"></span>Password</button>
+        </div>
+      </div>
+      <div id="authKey">
+        <label class="field">
+          <span>Private key <button type="button" class="link" id="keyFileBtn">Load from file…</button><input type="file" id="keyFile" hidden></span>
+          <textarea name="private_key" rows="5" class="mono" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
+        </label>
+        <label class="field"><span>Key passphrase <em>(optional)</em></span><input name="key_passphrase" type="password"></label>
+      </div>
+      <div id="authPass" hidden>
+        <label class="field"><span>Password</span><input name="password" type="password"></label>
+      </div>
+      <label class="field"><span>Sudo password <em>(optional — only if sudo asks for one)</em></span><input name="sudo_password" type="password"></label>
+      <div class="grid2">
+        <label class="field"><span>Start directory <em>(optional)</em></span><input name="default_path" placeholder="/var/www"></label>
+        <label class="field check"><input type="checkbox" name="pinned"><span>Pin to top</span></label>
+      </div>
+      <p class="hint" id="smSecretHint" hidden>Leave secret fields empty to keep the saved ones.</p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn btn-danger-ghost" id="smDelete" hidden><span class="i" data-icon="trash"></span>Delete</button>
+      <button type="button" class="btn btn-ghost" id="smForget" hidden title="Trust the server's new host key on next connect">Forget host key</button>
+      <div class="grow"></div>
+      <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+      <button type="submit" class="btn btn-primary"><span class="i" data-icon="check"></span>Save &amp; test</button>
+    </div>
+  </form>
+</div>
+<datalist id="folderList"></datalist>
+
+<!-- Audit modal -->
+<div class="modal-back" id="auditModal" hidden>
+  <div class="modal modal-wide">
+    <div class="modal-head">
+      <div><h3>Audit log</h3><p class="sub">Every command run by the AI or the Direct runner · kept for 5 days</p></div>
+      <button type="button" class="btn btn-ghost btn-icon" data-close><span class="i" data-icon="x"></span></button>
+    </div>
+    <div class="modal-body audit-body" id="auditBody"></div>
+  </div>
+</div>
+
+<!-- Chat history modal -->
+<div class="modal-back" id="historyModal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <div><h3>Chat history</h3><p class="sub" id="historySub">Each chat is kept for 15 days after its last message</p></div>
+      <button type="button" class="btn btn-ghost btn-icon" data-close><span class="i" data-icon="x"></span></button>
+    </div>
+    <div class="modal-body history-body" id="historyBody"></div>
+  </div>
+</div>
+
+<!-- Backup modal -->
+<div class="modal-back" id="backupModal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <div><h3>Backup &amp; restore</h3><p class="sub">One file with every server and its credentials — restore it on any PC</p></div>
+      <button type="button" class="btn btn-ghost btn-icon" data-close><span class="i" data-icon="x"></span></button>
+    </div>
+    <form class="modal-body" id="backupExportForm" autocomplete="off">
+      <h4 class="sec-title"><span class="i" data-icon="export"></span>Export</h4>
+      <p class="hint warn-hint"><span class="i" data-icon="alert"></span>The file holds every password and private key in plain text. Keep it somewhere safe and share it only with people who should have access to these servers.</p>
+      <div class="row-end"><button type="submit" class="btn btn-primary btn-sm"><span class="i" data-icon="export"></span>Export backup</button></div>
+    </form>
+    <form class="modal-body sec-split" id="backupImportForm" autocomplete="off">
+      <h4 class="sec-title"><span class="i" data-icon="import"></span>Restore</h4>
+      <label class="field"><span>Backup file</span><input name="file" type="file" accept=".sshpro,application/json" required></label>
+      <p class="hint">Servers are added to the list. Ones already here (same host, port and user) are left untouched — nothing is overwritten or removed.</p>
+      <div class="row-end"><button type="submit" class="btn btn-sm"><span class="i" data-icon="import"></span>Restore</button></div>
+    </form>
+  </div>
+</div>
+
+<!-- Confirm modal -->
+<div class="modal-back" id="confirmModal" hidden>
+  <div class="modal modal-small">
+    <div class="modal-head"><h3 id="cfTitle">Are you sure?</h3></div>
+    <div class="modal-body"><p id="cfText"></p></div>
+    <div class="modal-foot"><div class="grow"></div>
+      <button class="btn btn-ghost" id="cfNo">Cancel</button>
+      <button class="btn btn-danger" id="cfYes">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="/static/vendor/xterm.js"></script>
+<script src="/static/vendor/addon-fit.js"></script>
+<script src="/static/vendor/addon-web-links.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
