@@ -280,6 +280,10 @@ select option { background: var(--panel-solid); }
 .model-pill { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 11px; border-radius: 28px; font-size: 12px; color: var(--text-2); border: 1px solid var(--line); background: rgba(255,255,255,.02); font-family: var(--mono); }
 .model-pill select { height: 26px; padding: 0 22px 0 0; border: 0; background-color: transparent; font: inherit; color: inherit; box-shadow: none; max-width: 240px; cursor: pointer; }
 .model-pill select:disabled { opacity: .6; cursor: progress; }
+.auto-pill { gap: 6px; }
+.auto-pill > span { color: var(--text-3, var(--text-2)); font-size: 11px; }
+.auto-pill select { max-width: 150px; }
+.auto-pill[hidden] { display: none; }
 .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 0 rgba(52,211,153,.6); animation: pulse 2.2s infinite; }
 @keyframes pulse { 70% { box-shadow: 0 0 0 8px rgba(52,211,153,0); } 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); } }
 

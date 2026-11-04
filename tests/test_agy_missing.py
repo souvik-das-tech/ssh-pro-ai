@@ -16,6 +16,8 @@ def no_agy(monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", "Z:/nowhere")
     monkeypatch.delenv("SSHPRO_AGY", raising=False)
     monkeypatch.setattr(brain_mod, "agy_available", agy.agy_available)
+    monkeypatch.setattr(brain_mod.codex, "codex_available", lambda: None)  # ChatGPT brain missing too
+    monkeypatch.setattr("sshpro.server.codex_available", lambda: None)
 
 
 def test_find_agy_raises_with_install_link(no_agy):

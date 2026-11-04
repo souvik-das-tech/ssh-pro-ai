@@ -307,7 +307,7 @@ def test_job_local_build_upload_then_server_steps(tmp_path):
     results = [e for e in events if e["type"] == "ai.result"]
     assert [r["name"] for r in results] == ["This PC", "s0", "s0"] and all(r["exit"] == 0 for r in results)
     assert (tmp_path / "remote" / "build.txt").read_text().strip() == "built"
-    assert '"server_id": "local"' in ai.messages[1]
+    assert '["local","This PC"]' in ai.messages[1]
 
 
 def test_download_file_and_folder(tmp_path):
@@ -395,4 +395,6 @@ def test_failed_local_step_runs_nothing_on_servers(tmp_path):
     events, ai, db = _run_job(tmp_path, [bad, DONE], (True, "parallel"))
     results = [e for e in events if e["type"] == "ai.result"]
     assert len(results) == 1 and results[0]["exit"] == 3
-    assert ai.messages[1].count("skipped: a local step failed") == 3
+    # the three skipped servers are one grouped entry for the AI
+    assert ai.messages[1].count("skipped: a local step failed") == 1
+    assert '"on":[[1,"s0"],[2,"s1"],[3,"s2"]]' in ai.messages[1]

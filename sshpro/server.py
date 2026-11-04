@@ -18,11 +18,13 @@ from aiohttp import WSMsgType, web
 
 from sshpro import __version__
 from sshpro.agy import AGY_INSTALL_URL, AIError, agy_available
+from sshpro.codex import codex_available
 from sshpro.backup import export_backup, import_backup
 from sshpro.brain import Brain
 from sshpro.db import Database
 from sshpro.importer import import_termix
 from sshpro.paths import TERMIX_DB, WEB_DIR, data_dir
+from sshpro.router import AUTO
 from sshpro.sshpool import SSHError, SSHManager
 
 log = logging.getLogger(__name__)
@@ -92,6 +94,7 @@ class Backend:
         r.add_post("/api/ai/reset", self.ai_reset)
         r.add_get("/api/ai/models", self.ai_models)
         r.add_post("/api/ai/model", self.ai_set_model)
+        r.add_post("/api/ai/auto", self.ai_set_auto)
         r.add_get("/api/chats", self.list_chats)
         r.add_post("/api/chats/{id}/open", self.open_chat)
         r.add_delete("/api/chats/{id}", self.delete_chat)
@@ -136,7 +139,7 @@ class Backend:
 
     async def meta(self, request: web.Request) -> web.Response:
         return web.json_response({
-            "version": __version__, "model": self.brain.model, "agy": agy_available(),
+            "version": __version__, "model": self.brain.model, "agy": agy_available(), "codex": codex_available(),
             "agy_install_url": AGY_INSTALL_URL, "data_dir": str(data_dir()),
             "termix_db": str(TERMIX_DB) if TERMIX_DB.is_file() else None, "ssh_exe": shutil.which("ssh"),
             "chat": self.brain.chat, "chat_days": CHAT_DAYS,
@@ -258,15 +261,29 @@ class Backend:
         return web.json_response({"ok": True})
 
     async def ai_models(self, request: web.Request) -> web.Response:
-        return web.json_response({"models": await self.brain.models(), "current": self.brain.model})
+        models = await self.brain.models()
+        return web.json_response({"models": models, "current": self.brain.model,
+                                  "auto": await self.brain.auto_models()})
+
+    @staticmethod
+    def _model_id(value: Any) -> str:
+        model = str(value or "").strip()
+        if not model or any(c.isspace() for c in model):
+            raise ValueError("invalid model id")
+        return model
 
     async def ai_set_model(self, request: web.Request) -> web.Response:
         body = await request.json()
-        model = str(body.get("model") or "").strip()
-        if not model or any(c.isspace() for c in model):
-            raise ValueError("invalid model id")
-        await self.brain.set_model(model)
+        await self.brain.set_model(self._model_id(body.get("model")))
         return web.json_response({"ok": True, "model": self.brain.model})
+
+    async def ai_set_auto(self, request: web.Request) -> web.Response:
+        body = await request.json()
+        fast, smart = self._model_id(body.get("fast")), self._model_id(body.get("smart"))
+        if AUTO in (fast, smart):
+            raise ValueError("Auto needs real models")
+        await self.brain.set_auto(fast, smart)
+        return web.json_response({"ok": True, "auto": self.brain.auto})
 
     # ---- chat history --------------------------------------------------------------------
 

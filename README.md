@@ -37,11 +37,15 @@ window and lets an AI do the repetitive part without ever handing it the keys.
 - ⚡ **Parallel commands**: run one command on a whole folder or the whole fleet at once
   (**Direct** mode, no AI needed).
 - 🤖 **AI ops chat**: plain-language requests in English, Banglish or Hinglish, answered with a
-  per-server table. The AI can also search the web for CVEs, release notes and latest versions.
+  per-server table. With AGY the AI can also search the web for CVEs, release notes and latest versions.
+- 🧠 **Pick your brain**: Gemini, Claude and GPT-OSS through the AGY CLI, or **ChatGPT** through the
+  Codex CLI with your ChatGPT account. Switch any time, or let **⚡ Auto** pick a fast model for
+  quick checks and a smart one for troubleshooting, security and changes.
 - 🛡️ **Safe by design**: an allowlist decides what counts as read-only. Everything else waits for
   your approval and rolls out **canary-first** (one server, then the rest).
 - 🔐 **Secrets never leave your PC**: SSH keys and passwords are encrypted with Windows DPAPI.
   The AI only sees server names, folders, tags, user and OS: **never IPs, passwords or keys**.
+  Keys, passwords and tokens that show up in command output are masked before the AI sees them.
 - 📦 **Uploads and downloads**: send a file or folder from your PC to many servers (folders travel
   as one archive), or pull backups down into Downloads.
 - 🧾 **Audit log**: every prompt, command, server and result is recorded.
@@ -62,7 +66,7 @@ setup.cmd
 **SSH Pro AI** icon on your desktop. Double-click the icon (or run `run.cmd`) and add your first
 server with **Add server**.
 
-SSH, terminals and Direct mode work right away. Only the AI chat needs the AGY CLI (next section).
+SSH, terminals and Direct mode work right away. Only the AI chat needs an AI brain: the AGY CLI and/or ChatGPT (next sections).
 
 ### Enable the AI chat (AGY CLI)
 
@@ -78,8 +82,29 @@ winget install Google.AntigravityCLI
 Then run `agy` once in a terminal, sign in, and restart SSH Pro AI.
 Guide: <https://docs.flutter.dev/ai/antigravity-cli>
 
-Pick a model from the dropdown in the chat toolbar. The list comes live from `agy models`, so new
-models show up without an app update.
+### Use ChatGPT as the brain (Codex CLI)
+
+ChatGPT works too, through the **OpenAI Codex CLI** signed in with your ChatGPT account (no API
+key). If the ChatGPT/Codex desktop app or the VS Code ChatGPT extension is installed, its bundled
+`codex.exe` is found automatically. Otherwise install the CLI (`npm i -g @openai/codex`), then run
+`codex login` once and restart SSH Pro AI. Guide: <https://developers.openai.com/codex/cli>
+
+Codex only plans, exactly like AGY: its shell, sub-agent, plugin and browser tools are disabled
+and its sandbox is read-only, so the app stays the only thing that runs commands.
+
+### Pick a model
+
+Pick a model from the dropdown in the chat toolbar and switch whenever you like (a switch starts a
+new chat). It lists AGY models (`agy models`) and ChatGPT models (`ChatGPT · …`, from the Codex
+catalog) side by side, live, so new models show up without an app update.
+
+**⚡ Auto** picks the model per request, locally and instantly (no extra AI call). Quick checks
+and chat ("disk space koto?", "node version") go to the **Fast** model. Troubleshooting ("502
+keno?"), security/CVE questions, installs, deploys, config changes and long requests go to the
+**Smart** model. Pick both models next to the dropdown; by default the model you used before
+becomes Smart, and the fastest Gemini Flash becomes Fast. A chat that needed the Smart model
+stays on it, and if the Fast model fails a round, the Smart model takes that round over with the
+chat so far. The status line shows which model is working and why.
 
 ## How the AI works
 
@@ -88,8 +113,8 @@ models show up without an app update.
         │
         ▼
  ┌──────────────┐  server list (names, folders, tags, OS; no IPs, no secrets)
- │  AGY CLI     │◄──────────────────────────────────────────────┐
- │  (planner)   │                                               │
+ │ AGY / Codex  │◄──────────────────────────────────────────────┐
+ │  (planner)   │   outputs with secrets masked                 │
  └──────┬───────┘                                               │
         │ JSON plan: steps, risk, rollout                       │
         ▼                                                       │
@@ -104,15 +129,27 @@ models show up without an app update.
                                  answer + per-server table
 ```
 
-1. Your message and a **redacted** server list go to the AGY CLI.
-2. AGY replies with a JSON plan: which servers, which commands, how risky.
+1. Your message and a **redacted** server list go to the AI CLI of the chosen model (AGY, or
+   Codex for ChatGPT).
+2. The AI replies with a JSON plan: which servers, which commands, how risky.
 3. SSH Pro AI checks every command against its own **read-only allowlist**. It never trusts the
    AI's own risk label on its own.
 4. Read-only steps run immediately in parallel. Anything else (install, restart, delete, upload,
    local commands) is shown to you first and needs **Approve**.
-5. Results go back to AGY for analysis (up to 6 rounds), and you get a summary and a table.
+5. Results go back to the AI for analysis (up to 6 rounds), and you get a summary and a table.
+   Servers with the same output are grouped and long output is cut to its start and end, so a
+   big fleet costs few tokens.
 
-AGY never executes anything itself. The app runs every command, and AGY's own tools stay disabled.
+The AI (AGY or ChatGPT) never executes anything itself. The app runs every command, and the AI's
+own tools stay disabled.
+
+**Nothing changes without your OK.** A step runs at once only if the app's own allowlist says it
+just reads, whatever risk the AI claims. Tools that look harmless but can write or run things
+(`sed 's/x/y/w file'`, `sort -o`, `curl -o`, `awk 'print > f'`, `env rm`, `git branch -D`,
+`systemctl --failed restart x` …) need approval. So do network commands that could carry server
+data out (`curl host/$(cat secret)`, data piped into `openssl s_client`). Before output goes to
+the AI, private keys, passwords, tokens and password hashes are replaced with `[REDACTED]`. Your
+screen and the audit log still show the full output.
 
 ## Working on your PC too
 
@@ -161,6 +198,8 @@ or use **Load from file…**. That file contains plain-text secrets and is git-i
 |---|---|
 | `SSHPRO_AGY` | Path to `agy.exe` if it is installed somewhere non-standard |
 | `SSHPRO_AGY_MODEL` | Default AI model (the dropdown choice overrides it) |
+| `SSHPRO_CODEX` | Path to `codex.exe` if it is installed somewhere non-standard |
+| `SSHPRO_CODEX_EFFORT` | Reasoning effort for ChatGPT models (default `low`; `medium`/`high` are slower) |
 | `SSHPRO_DATA_DIR` | Use a different data folder (handy for testing) |
 
 ## Development
@@ -177,7 +216,7 @@ Run only the backend and open the printed URL in a browser:
 .venv\Scripts\python -m sshpro --serve
 ```
 
-The tests include a fake SSH server and a fake AI provider, so no real servers or AGY account are
+The tests include a fake SSH server and fake AI providers, so no real servers, AGY or ChatGPT account are
 needed. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a tour of the code.
 
 ## Roadmap

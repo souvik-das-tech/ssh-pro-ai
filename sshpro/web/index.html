@@ -16,7 +16,7 @@
       <div class="logo"><svg viewBox="0 0 24 24"><polyline points="5 16 10 11 5 6"/><line x1="12" y1="18" x2="19" y2="18"/></svg></div>
       <div class="brand-text">
         <div class="brand-name">SSH Pro <span class="grad">AI</span></div>
-        <div class="brand-sub" id="brandSub">fleet control · AGY brain</div>
+        <div class="brand-sub" id="brandSub">fleet control · AI brain</div>
       </div>
     </div>
 
@@ -91,7 +91,8 @@
           <span class="target-info" id="targetInfo"></span>
         </div>
         <div class="grow"></div>
-        <span class="model-pill" id="modelPill" title="AI model (list comes live from `agy models`)"><span class="pulse"></span><span id="modelName">AGY</span><select id="modelSel" hidden></select></span>
+        <span class="model-pill" id="modelPill" title="AI model (live list from AGY and ChatGPT / Codex)"><span class="pulse"></span><span id="modelName">AI</span><select id="modelSel" hidden></select></span>
+        <span class="model-pill auto-pill" id="autoPill" hidden title="Auto: quick checks and chat use the Fast model; troubleshooting, security, changes and long requests use the Smart model"><span>Fast</span><select id="autoFast"></select><span>Smart</span><select id="autoSmart"></select></span>
         <button class="btn btn-ghost btn-sm" id="btnHistory" title="Earlier chats"><span class="i" data-icon="history"></span>History</button>
         <button class="btn btn-ghost btn-sm" id="btnNewChat" title="Start a fresh AI conversation"><span class="i" data-icon="plus"></span>New chat</button>
       </div>
@@ -100,12 +101,12 @@
           <div class="empty" id="chatEmpty">
             <div class="empty-orb"><span class="i" data-icon="sparkles"></span></div>
             <h2>Ask anything about your fleet</h2>
-            <p>AGY plans the commands, SSH Pro AI runs them on every target server in parallel and brings back one clear answer. Anything that changes a server waits for your approval.</p>
+            <p>The AI (AGY or ChatGPT) plans the commands, SSH Pro AI runs them on every target server in parallel and brings back one clear answer. Anything that changes a server waits for your approval.</p>
             <div class="suggest" id="suggest"></div>
           </div>
           <div class="agy-missing" id="agyMissing" hidden>
-            <div class="agy-missing-head"><span class="i" data-icon="sparkles"></span><h3>AI chat needs the AGY CLI</h3></div>
-            <p>The AI chat runs on the Antigravity CLI (<code>agy</code>) installed on this computer, and it was not found. Everything else works without it: servers, terminals and <b>Direct</b> mode commands.</p>
+            <div class="agy-missing-head"><span class="i" data-icon="sparkles"></span><h3>AI chat needs the AGY CLI or ChatGPT</h3></div>
+            <p>The AI chat runs on the Antigravity CLI (<code>agy</code>) installed on this computer, and it was not found (nor the ChatGPT Codex CLI — install it and run <code>codex login</code> to use ChatGPT instead). Everything else works without it: servers, terminals and <b>Direct</b> mode commands.</p>
             <ol>
               <li>Install it — PowerShell: <code>irm https://antigravity.google/install.ps1 | iex</code> &nbsp;or&nbsp; <code>winget install Google.AntigravityCLI</code></li>
               <li>Open a new terminal, run <code>agy</code> once and sign in</li>

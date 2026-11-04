@@ -13,7 +13,7 @@ user's Windows PC.
   shows sshpro/web/               │
                                   ├── Database (SQLite, DPAPI secrets)
                                   ├── SSHManager (asyncssh pool: run / probe / shell / SFTP)
-                                  └── Brain (AI loop) ──► AGY CLI subprocess (planner only)
+                                  └── Brain (AI loop) ──► AGY CLI or Codex CLI (ChatGPT) subprocess (planner only)
 ```
 
 ## Modules
@@ -25,9 +25,11 @@ user's Windows PC.
 | `sshpro/db.py` | SQLite store for servers, audit log and chat history. Secret columns go through `crypto.py`. |
 | `sshpro/crypto.py` | Windows DPAPI protect/unprotect. |
 | `sshpro/sshpool.py` | Connection pool on asyncssh: run commands, probe OS and status, interactive shells, SFTP upload/download (folders as one tar.gz). Trust-on-first-use host keys. |
-| `sshpro/safety.py` | Classifies shell and PowerShell commands as read-only or changing (allowlist, quoting- and substitution-aware), and wraps `sudo` so the password goes through stdin. |
-| `sshpro/brain.py` | The AI loop: send the request and a redacted server list to AGY, parse its JSON plan, run read-only steps, wait for approval on others, feed results back, at most 6 rounds. |
+| `sshpro/safety.py` | Classifies shell and PowerShell commands as read-only or changing (allowlist with per-tool argument checks, quoting-, substitution- and pipe-aware; network tools with dynamic or piped data count as changes), masks secrets in output for the AI (`redact_secrets`), and wraps `sudo` so the password goes through stdin. |
+| `sshpro/brain.py` | The AI loop: send the request and a redacted server list to the AI, parse its JSON plan, run read-only steps, wait for approval on others, feed results back (secrets masked, servers with the same output grouped, long output cut to head + tail), at most 6 rounds. |
 | `sshpro/agy.py` | Adapter for the AGY CLI: install detection, persistent session with one-shot fallback, model list, timeouts. |
+| `sshpro/codex.py` | Adapter for ChatGPT via the Codex CLI: `codex exec --json` per turn, later turns `exec resume` the same thread; tools disabled, read-only sandbox. Model ids are `chatgpt:<slug>`, and `Brain` picks the adapter by that prefix. |
+| `sshpro/router.py` | Auto model choice: a keyword classifier (English, Banglish, Hinglish) sends each request to the fast or the smart model; default model picks. `Brain` switches sessions and hands over the chat. |
 | `sshpro/localexec.py` | Runs PowerShell steps on this PC. |
 | `sshpro/backup.py` | `.sshpro` export and import (plain JSON, re-encrypted on import). |
 | `sshpro/importer.py` | Imports hosts from a Termix `ssh.sqlite`. |

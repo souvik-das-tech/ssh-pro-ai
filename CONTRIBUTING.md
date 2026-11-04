@@ -44,6 +44,10 @@ SSH Pro AI runs commands on real servers, so a few rules are firm:
    anything sent to the AI provider.
 3. **Changes need approval.** Never add a path that runs a non-read-only command, upload,
    download or local command without the user approving it.
+4. **Read-only also means nothing leaves the server.** A network tool counts as read-only only
+   when its request is fixed text: no variables, substitutions, `@file` or piped data.
+5. **Output for the AI goes through `redact_secrets`.** Any new place that sends command output
+   or file contents to the AI must mask it first, and needs a test.
 
 ## Code of conduct
 

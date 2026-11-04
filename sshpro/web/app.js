@@ -372,10 +372,10 @@ function setMode(mode) {
   S.mode = mode;
   $$('#modeSeg button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
   $('#composer').classList.toggle('direct', mode === 'direct');
-  const noAgy = mode === 'ai' && S.meta.agy === null;
+  const noAgy = mode === 'ai' && S.meta.agy === null && !S.meta.codex;
   $('#agyMissing').hidden = !noAgy;
   $('#chatEmpty').classList.toggle('dim', noAgy);
-  $('#prompt').placeholder = noAgy ? 'AI chat needs the AGY CLI — install it (see above), or switch to Direct mode'
+  $('#prompt').placeholder = noAgy ? 'AI chat needs the AGY CLI or ChatGPT (Codex CLI) — see above, or switch to Direct mode'
     : mode === 'ai' ? 'Ask in any language — e.g. “sob server er node version check koro”' : 'Shell command to run on every target server — e.g. df -h /';
   updateComposerHint();
 }
@@ -532,7 +532,7 @@ async function send() {
   const user = userBubble({ mode: S.mode, text, target });
   $('#chatEmpty').hidden = true;
   if (S.mode === 'ai') {
-    if (S.meta.agy === null) { $('#agyMissing').hidden = false; return toast('AI chat needs the AGY CLI — install it first', 'bad'); }
+    if (S.meta.agy === null && !S.meta.codex) { $('#agyMissing').hidden = false; return toast('AI chat needs the AGY CLI or ChatGPT (Codex CLI) — install one first', 'bad'); }
     if (S.aiBusy) return toast('The AI is still working — stop it or wait', 'bad');
     try {
       $('#chatInner').appendChild(user);
@@ -569,12 +569,13 @@ function ensureJob(id) {
   return S.jobs.get(id);
 }
 
-function setStatus(jobId, state, text) {
+function setStatus(jobId, state, text, model, why) {
   const job = S.jobs.get(jobId);
   if (!job) return;
   if (!job.statusEl) { job.statusEl = document.createElement('div'); job.statusEl.className = 'thinking'; }
+  const who = model || brainName(); // the model actually working (under Auto it changes per request)
   const labels = {
-    thinking: text || (job.rounds.size ? 'AGY is analysing the results…' : 'AGY is planning…'),
+    thinking: text || (job.rounds.size ? `${who} is analysing the results…` : `${who} is planning…${why ? ` (${why})` : ''}`),
     running: text || 'Running on servers…',
     waiting: 'Waiting for your approval',
   };
@@ -814,7 +815,7 @@ function onEvent(ev) {
   // chat that was just closed cannot claim the new one)
   if (S.chat == null && ev.chat > S.chatFloor) S.chat = ev.chat;
   if (ev.chat !== S.chat) return; // another chat (e.g. one still running when you switched away)
-  if (ev.type === 'ai.status') return setStatus(ev.job, ev.state, ev.text);
+  if (ev.type === 'ai.status') return setStatus(ev.job, ev.state, ev.text, ev.model, ev.why);
   chatEvent(ev, false);
 }
 
@@ -841,7 +842,7 @@ function chatEvent(ev, replay) {
       const job = ensureJob(ev.job);
       const el = document.createElement('div');
       el.className = 'error-box';
-      el.textContent = /AIAuthError|not signed in/i.test(ev.text) ? 'AGY is not signed in. Open a terminal, run `agy`, sign in, then try again.' : ev.text;
+      el.textContent = /not signed in/i.test(ev.text) ? ev.text.replace(/^AIAuthError:\s*/, '') : ev.text;
       job.col.appendChild(el);
       return scrollChat();
     }
@@ -1220,15 +1221,30 @@ async function loadServers() {
   render();
 }
 
+// Which brain the chosen model runs on: ChatGPT models come from the Codex CLI, the rest from AGY.
+const brainName = () => (String(S.meta?.model || '').startsWith('chatgpt:') ? 'ChatGPT' : 'AGY');
+
+const AUTO = 'auto';
+const options = (list) => list.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('');
+
 async function loadModels() {
   const sel = $('#modelSel');
   try {
-    const { models, current } = await api('/api/ai/models');
-    const list = models.some((m) => m.id === current) ? models : [{ id: current, label: `${current} (not available)` }, ...models];
-    sel.innerHTML = list.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('');
+    const { models, current, auto } = await api('/api/ai/models');
+    const known = current === AUTO || models.some((m) => m.id === current);
+    const list = known ? models : [{ id: current, label: `${current} (not available)` }, ...models];
+    sel.innerHTML = `<option value="${AUTO}">⚡ Auto (fast ↔ smart)</option>` + options(list);
     sel.value = current;
     sel.hidden = false;
     $('#modelName').hidden = true;
+    // Auto's two models: pick from the same list
+    for (const [id, value] of [['#autoFast', auto?.fast], ['#autoSmart', auto?.smart]]) {
+      const pick = $(id);
+      const extra = value && !models.some((m) => m.id === value) ? [{ id: value, label: `${value} (not available)` }] : [];
+      pick.innerHTML = options([...extra, ...models]);
+      if (value) pick.value = value;
+    }
+    $('#autoPill').hidden = current !== AUTO;
   } catch (err) {
     toast(`Could not load AI models: ${err.message}`, 'bad');
   }
@@ -1242,6 +1258,8 @@ $('#modelSel').onchange = async (e) => {
     const { model } = await api('/api/ai/model', { model: sel.value });
     S.meta.model = model;
     clearChat();
+    $('#autoPill').hidden = model !== AUTO;
+    if (model === AUTO) loadModels(); // shows the fast / smart models Auto will use
     toast(`AI model: ${sel.selectedOptions[0].textContent} — new chat started`, 'ok');
   } catch (err) {
     sel.value = prev;
@@ -1250,6 +1268,17 @@ $('#modelSel').onchange = async (e) => {
     sel.disabled = false;
   }
 };
+
+const saveAuto = async () => {
+  try {
+    await api('/api/ai/auto', { fast: $('#autoFast').value, smart: $('#autoSmart').value });
+    toast(`Auto: fast = ${$('#autoFast').selectedOptions[0].textContent}, smart = ${$('#autoSmart').selectedOptions[0].textContent}`, 'ok');
+  } catch (err) {
+    toast(err.message, 'bad');
+  }
+};
+$('#autoFast').onchange = saveAuto;
+$('#autoSmart').onchange = saveAuto;
 
 $('#agyInstallLink').onclick = () => api('/api/open', { url: S.meta.agy_install_url }).catch((err) => toast(err.message, 'bad'));
 
@@ -1261,11 +1290,12 @@ async function boot() {
   try {
     await loadServers();
     S.meta = await api('/api/meta');
-    $('#modelName').textContent = S.meta.model || 'AGY';
-    $('#brandSub').textContent = `v${S.meta.version} · AGY brain${S.meta.agy ? '' : ' (not found)'}`;
-    if (!S.meta.agy) {
+    $('#modelName').textContent = S.meta.model || 'AI';
+    const brains = [S.meta.agy && 'AGY', S.meta.codex && 'ChatGPT'].filter(Boolean);
+    $('#brandSub').textContent = `v${S.meta.version} · ${brains.length ? brains.join(' + ') : 'AI'} brain${brains.length ? '' : ' (not found)'}`;
+    if (!brains.length) {
       $('#modelPill .pulse').style.background = 'var(--bad)';
-      $('#modelName').textContent = 'AGY not installed';
+      $('#modelName').textContent = 'No AI brain installed';
       setMode(S.mode);
     } else {
       loadModels();
