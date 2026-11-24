@@ -44,6 +44,9 @@ const ICONS = {
   package: '<path d="M16.5 9.4 7.5 4.2M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7z"/><path d="M3.3 7 12 12l8.7-5M12 22V12"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
   loader: '<path d="M21 12a9 9 0 1 1-6.2-8.6"/>',
+  sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  minus: '<path d="M5 12h14"/>',
+  star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/>',
   reconnect: '<path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/>',
 };
 const svg = (name) => `<svg viewBox="0 0 24 24">${ICONS[name] || ''}</svg>`;
@@ -88,17 +91,17 @@ const S = {
   view: 'overview',
   folder: 'all',
   mode: 'ai',
+  // target / custom / mode are the shown chat window's (each window keeps its own; see activateWin)
   target: 'all',
+  custom: new Set(), // hand-picked servers from any folders (the "Custom" target)
+  targetSets: store.get('targetSets', []), // saved custom selections: [{ name, ids }]
   terms: new Map(),
   activeTerm: null,
   tile: false,
   broadcast: false,
-  jobs: new Map(),
-  batches: new Map(),
-  chat: null, // chat history id shown in the AI page (null = new chat, created on its first message)
+  wins: new Map(), // chat windows (they work at the same time), in tab order
+  win: null, // id of the window shown
   lastChat: 0, // highest chat id seen
-  chatFloor: 0, // a new chat's id is above this
-  aiBusy: false,
   meta: {},
 };
 let termSeq = 0;
@@ -298,7 +301,7 @@ $('#cards').addEventListener('click', (e) => {
   if (!act || !id) return;
   if (act === 'term') openTerminal(id);
   if (act === 'edit') openServerModal(S.servers.get(id));
-  if (act === 'ask') { S.target = `server:${id}`; renderTargets(); showView('ai'); $('#prompt').focus(); }
+  if (act === 'ask') { setTarget(`server:${id}`); showView('ai'); $('#prompt').focus(); }
 });
 
 /* ================================================================ views / tabs */
@@ -320,15 +323,23 @@ const SUGGESTIONS = [
   { ico: 'layers', c: '', title: 'PHP versions', text: 'Which PHP version runs where, and which servers have no PHP', prompt: 'Sob server er PHP version check koro, ar kon server e PHP nai seta bolo' },
   { ico: 'package', c: 'g', title: 'Node.js versions', text: 'Node.js version on every server, flag missing or outdated', prompt: 'Sob server er Node.js version check koro, kono server e Node.js na thakle janao' },
   { ico: 'shield', c: 'o', title: 'Pending security updates', text: 'Count pending (security) package updates per server', prompt: 'How many package updates (and security updates) are pending on each server?' },
+  // these need your server names: they fill the box instead of sending
+  { ico: 'layers', c: 'g', fill: true, title: 'Move GeoServer', text: 'GeoServer with its data dir, verified, nothing lost', prompt: 'Move GeoServer with all its data from SOURCE to TARGET without losing anything. Inspect both first, then show me the plan.' },
+  { ico: 'disk', c: 'c', fill: true, title: 'Move a database', text: 'PostgreSQL / MySQL to another server, row counts checked', prompt: 'Move the database DBNAME from SOURCE to TARGET without data loss, then compare the row counts of every table.' },
 ];
 $('#suggest').innerHTML = SUGGESTIONS.map((s, i) => `<div class="sg" data-i="${i}"><div class="ico ${s.c}">${icon(s.ico)}</div><div><b>${s.title}</b><span>${s.text}</span></div></div>`).join('');
 $('#suggest').addEventListener('click', (e) => {
   const sg = e.target.closest('.sg');
   if (!sg) return;
   setMode('ai');
-  $('#prompt').value = SUGGESTIONS[+sg.dataset.i].prompt;
+  const sug = SUGGESTIONS[+sg.dataset.i];
+  $('#prompt').value = sug.prompt;
   autoGrow();
-  send();
+  if (!sug.fill) return send();
+  const t = $('#prompt'); // select the first placeholder to type over
+  const at = t.value.search(/\b(SOURCE|DBNAME)\b/);
+  t.focus();
+  if (at >= 0) t.setSelectionRange(at, at + t.value.slice(at).match(/^\w+/)[0].length);
 });
 
 function renderTargets() {
@@ -336,12 +347,17 @@ function renderTargets() {
   const count = (f) => all.filter((s) => folderName(s) === f).length;
   const online = (ids) => ids.filter((id) => S.servers.get(id)?.last_status === 'online').length;
   if (S.target === 'selected' && !S.selected.size) S.target = 'all';
-  if (S.target.startsWith('folder:') && !folders().includes(S.target.slice(7))) S.target = 'all';
-  if (S.target.startsWith('server:') && !S.servers.has(+S.target.slice(7))) S.target = 'all';
+  if (S.servers.size) { // the saved target is only checked once the server list has loaded
+    if (S.target.startsWith('folder:') && !folders().includes(S.target.slice(7))) S.target = 'all';
+    if (S.target.startsWith('server:') && !S.servers.has(+S.target.slice(7))) S.target = 'all';
+    pruneCustom();
+  }
   const chips = [['all', 'All servers', all.length, icon('layers')], ...folders().map((f) => [`folder:${f}`, f, count(f), icon('folder')])];
   if (S.selected.size) chips.push(['selected', 'Selected', S.selected.size, icon('check')]);
+  const tip = (label, n) => `${label}: ${n} servers · Ctrl+click to add/remove it in a custom selection`;
   $('#targetChips').innerHTML = chips.map(([value, label, n, ic]) =>
-    `<button class="chip ${S.target === value ? 'on' : ''}" data-target="${esc(value)}" title="${esc(label)}: ${n} servers">${ic}${esc(label)} <b>${n}</b></button>`).join('');
+    `<button class="chip ${S.target === value ? 'on' : ''}" data-target="${esc(value)}" title="${esc(tip(label, n))}">${ic}${esc(label)} <b>${n}</b></button>`).join('')
+    + `<button class="chip chip-custom ${S.target === 'custom' ? 'on' : ''}" data-target="custom" title="Pick any servers from any folders">${icon('sliders')}Custom <b>${S.custom.size}</b></button>`;
   const sel = $('#targetSel');
   sel.innerHTML = `<option value="">One server…</option>` + all.map((s) => `<option value="server:${s.id}">${esc(s.name)}</option>`).join('');
   sel.value = S.target.startsWith('server:') ? S.target : '';
@@ -349,27 +365,192 @@ function renderTargets() {
   const ids = targetIds();
   $('#targetInfo').textContent = `${online(ids)}/${ids.length} online`;
   updateComposerHint();
+  renderWinTabs();
+  if (!$('#tpick').hidden) renderPicker();
 }
-function setTarget(value) { S.target = value || 'all'; renderTargets(); }
-$('#targetChips').addEventListener('click', (e) => { const c = e.target.closest('[data-target]'); if (c) setTarget(c.dataset.target); });
+function setTarget(value) {
+  S.target = value || 'all';
+  saveWins();
+  renderTargets();
+}
+$('#targetChips').addEventListener('click', (e) => {
+  const c = e.target.closest('[data-target]');
+  if (!c) return;
+  const value = c.dataset.target;
+  if (value === 'custom') {
+    if (S.target !== 'custom' && !S.custom.size) setCustom(targetIds()); // start from what was targeted
+    setTarget('custom');
+    return togglePicker();
+  }
+  if (e.ctrlKey || e.metaKey || e.shiftKey) { // combine folders: Ctrl+click adds / removes a whole folder
+    const base = new Set(S.target === 'custom' ? S.custom : targetIds());
+    const ids = idsFor(value, S.custom);
+    const has = ids.length && ids.every((id) => base.has(id));
+    ids.forEach((id) => (has ? base.delete(id) : base.add(id)));
+    setCustom(base);
+    return setTarget('custom');
+  }
+  setTarget(value);
+});
 $('#targetSel').onchange = (e) => setTarget(e.target.value);
 
-function targetIds() {
+/* ---- custom target picker: any servers from any folders ---- */
+function setCustom(ids) {
+  S.custom = new Set(ids);
+  saveWins();
+}
+function pruneCustom() { // forget servers that were deleted
+  const gone = [...S.custom].filter((id) => !S.servers.has(id));
+  if (gone.length) setCustom([...S.custom].filter((id) => S.servers.has(id)));
+  const sets = S.targetSets.map((t) => ({ ...t, ids: t.ids.filter((id) => S.servers.has(id)) })).filter((t) => t.ids.length);
+  if (sets.length !== S.targetSets.length || sets.some((t, i) => t.ids.length !== S.targetSets[i].ids.length)) saveSets(sets);
+}
+function saveSets(sets) { S.targetSets = sets; store.set('targetSets', sets); }
+// A short human label for a set of servers: whole folders by name, then the rest by name or count.
+function describeIds(ids) {
+  const want = new Set(ids);
   const all = serverList();
-  if (S.target === 'selected') return [...S.selected];
-  if (S.target.startsWith('folder:')) { const f = S.target.slice(7); return all.filter((s) => folderName(s) === f).map((s) => s.id); }
-  if (S.target.startsWith('server:')) return [+S.target.slice(7)];
+  if (want.size && want.size === all.length) return 'All servers';
+  const parts = [];
+  const left = new Set(want);
+  for (const f of folders()) {
+    const members = all.filter((s) => folderName(s) === f).map((s) => s.id);
+    if (members.length > 1 && members.every((id) => want.has(id))) { parts.push(f); members.forEach((id) => left.delete(id)); }
+  }
+  const names = [...left].map((id) => S.servers.get(id)?.name).filter(Boolean);
+  if (names.length <= 3) parts.push(...names);
+  else parts.push(`${names.length} servers`);
+  return parts.join(', ') || 'nothing';
+}
+
+const picker = { q: '', saving: false };
+function togglePicker(open = $('#tpick').hidden) {
+  $('#tpick').hidden = !open;
+  if (!open) return;
+  picker.saving = false;
+  renderPicker();
+  $('#tpickQ').focus();
+}
+function pickerShown() {
+  const q = picker.q.trim().toLowerCase();
+  return serverList()
+    .filter((s) => !q || [s.name, s.host, s.username, folderName(s)].some((v) => String(v || '').toLowerCase().includes(q)))
+    .sort((a, b) => folderName(a).localeCompare(folderName(b)) || a.name.localeCompare(b.name));
+}
+function renderPicker() {
+  const shown = pickerShown();
+  const byFolder = new Map();
+  shown.forEach((s) => { const f = folderName(s); if (!byFolder.has(f)) byFolder.set(f, []); byFolder.get(f).push(s); });
+  const box = (state) => `<span class="tbox ${state}">${svg(state === 'mixed' ? 'minus' : 'check')}</span>`;
+  $('#tpickList').innerHTML = byFolder.size ? [...byFolder].map(([f, items]) => {
+    const n = items.filter((s) => S.custom.has(s.id)).length;
+    const state = n === 0 ? '' : n === items.length ? 'on' : 'mixed';
+    return `<div class="tp-group">
+      <button class="tp-folder" data-folder="${esc(f)}">${box(state)}${icon('folder')}<span>${esc(f)}</span><b>${n}/${items.length}</b></button>
+      ${items.map((s) => `<button class="tp-srv" data-id="${s.id}">${box(S.custom.has(s.id) ? 'on' : '')}<span class="dot ${status(s)}"></span>
+        <span class="tp-name">${esc(s.name)}</span><span class="tp-host">${esc(s.username)}@${esc(s.host)}</span></button>`).join('')}
+    </div>`;
+  }).join('') : `<div class="tp-empty">No servers match “${esc(picker.q)}”</div>`;
+
+  const sets = S.targetSets.map((t, i) => {
+    const same = t.ids.length === S.custom.size && t.ids.every((id) => S.custom.has(id));
+    return `<span class="tp-set ${same ? 'on' : ''}" data-set="${i}" title="${esc(describeIds(t.ids))}">${esc(t.name)} <b>${t.ids.length}</b><button data-del="${i}" title="Delete this saved selection">${svg('x')}</button></span>`;
+  }).join('');
+  const save = picker.saving
+    ? `<input id="tpickName" class="tp-name-in" maxlength="40" placeholder="Name, then Enter">`
+    : `<button class="tp-save" id="tpickSave" ${S.custom.size ? '' : 'disabled'} title="Save this selection to reuse later">${svg('plus')}Save selection</button>`;
+  $('#tpickSets').innerHTML = `<span class="tp-sets-label">Saved</span>${sets || '<span class="tp-none">none yet</span>'}${save}`;
+  if (picker.saving) $('#tpickName').focus();
+
+  const ids = [...S.custom];
+  const on = ids.filter((id) => S.servers.get(id)?.last_status === 'online').length;
+  $('#tpickCount').innerHTML = ids.length
+    ? `<b>${ids.length}</b> selected · ${on} online · <span class="tp-desc">${esc(describeIds(ids))}</span>`
+    : 'Nothing selected — tick servers or whole folders';
+}
+function changeCustom(fn) {
+  const next = new Set(S.custom);
+  fn(next);
+  setCustom(next);
+  setTarget('custom');
+}
+$('#tpickQ').addEventListener('input', (e) => { picker.q = e.target.value; renderPicker(); });
+$('#tpickQ').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { // Enter ticks everything the filter shows
+    e.preventDefault();
+    const shown = pickerShown().map((s) => s.id);
+    changeCustom((set) => shown.forEach((id) => set.add(id)));
+  }
+});
+$('#tpick').addEventListener('click', (e) => {
+  const q = e.target.closest('[data-q]')?.dataset.q;
+  const shown = pickerShown();
+  if (q) {
+    return changeCustom((set) => {
+      if (q === 'all') shown.forEach((s) => set.add(s.id));
+      if (q === 'none') shown.forEach((s) => set.delete(s.id));
+      if (q === 'online') shown.forEach((s) => { if (s.last_status !== 'online') set.delete(s.id); });
+      if (q === 'invert') shown.forEach((s) => (set.has(s.id) ? set.delete(s.id) : set.add(s.id)));
+    });
+  }
+  const del = e.target.closest('[data-del]');
+  if (del) { saveSets(S.targetSets.filter((_, i) => i !== +del.dataset.del)); return renderPicker(); }
+  const setEl = e.target.closest('[data-set]');
+  if (setEl) return changeCustom((set) => { set.clear(); S.targetSets[+setEl.dataset.set].ids.forEach((id) => set.add(id)); });
+  if (e.target.closest('#tpickSave')) { picker.saving = true; return renderPicker(); }
+  const folder = e.target.closest('.tp-folder');
+  if (folder) {
+    const ids = shown.filter((s) => folderName(s) === folder.dataset.folder).map((s) => s.id);
+    const all = ids.every((id) => S.custom.has(id));
+    return changeCustom((set) => ids.forEach((id) => (all ? set.delete(id) : set.add(id))));
+  }
+  const row = e.target.closest('.tp-srv');
+  if (row) { const id = +row.dataset.id; return changeCustom((set) => (set.has(id) ? set.delete(id) : set.add(id))); }
+  if (e.target.closest('#tpickDone')) togglePicker(false);
+});
+$('#tpick').addEventListener('keydown', (e) => {
+  if (e.target.id === 'tpickName') {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const name = e.target.value.trim();
+      if (name && S.custom.size) {
+        saveSets([...S.targetSets.filter((t) => t.name.toLowerCase() !== name.toLowerCase()), { name, ids: [...S.custom] }]);
+        toast(`Saved selection “${name}” (${S.custom.size} servers)`, 'ok');
+      }
+      picker.saving = false;
+      renderPicker();
+    }
+    if (e.key === 'Escape') { e.stopPropagation(); picker.saving = false; renderPicker(); }
+    return;
+  }
+  if (e.key === 'Escape') { e.stopPropagation(); togglePicker(false); $('#prompt').focus(); }
+});
+document.addEventListener('mousedown', (e) => {
+  if (!$('#tpick').hidden && !e.target.closest('#tpick') && !e.target.closest('.chip-custom')) togglePicker(false);
+});
+
+function idsFor(target, custom) {
+  const all = serverList();
+  if (target === 'selected') return [...S.selected];
+  if (target === 'custom') return [...custom];
+  if (target.startsWith('folder:')) { const f = target.slice(7); return all.filter((s) => folderName(s) === f).map((s) => s.id); }
+  if (target.startsWith('server:')) return [+target.slice(7)];
   return all.map((s) => s.id);
 }
-function targetLabel() {
-  if (S.target === 'selected') return `Selected (${S.selected.size})`;
-  if (S.target.startsWith('folder:')) return `Folder: ${S.target.slice(7)}`;
-  if (S.target.startsWith('server:')) return S.servers.get(+S.target.slice(7))?.name || 'server';
+function labelFor(target, custom) {
+  if (target === 'selected') return `Selected (${S.selected.size})`;
+  if (target === 'custom') return `Custom (${custom.size}): ${describeIds([...custom])}`;
+  if (target.startsWith('folder:')) return `Folder: ${target.slice(7)}`;
+  if (target.startsWith('server:')) return S.servers.get(+target.slice(7))?.name || 'server';
   return 'All servers';
 }
+const targetIds = () => idsFor(S.target, S.custom);
+const targetLabel = () => labelFor(S.target, S.custom);
 
 function setMode(mode) {
   S.mode = mode;
+  saveWins();
+  busyUI();
   $$('#modeSeg button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
   $('#composer').classList.toggle('direct', mode === 'direct');
   const noAgy = mode === 'ai' && S.meta.agy === null && !S.meta.codex;
@@ -383,9 +564,10 @@ $$('#modeSeg button').forEach((b) => (b.onclick = () => setMode(b.dataset.mode))
 
 function updateComposerHint() {
   const n = targetIds().length;
-  $('#composerHint').textContent = S.mode === 'ai'
+  const w = AW();
+  $('#composerHint').textContent = (w && S.wins.size > 1 ? `${winName(w)} · ` : '') + (S.mode === 'ai'
     ? `AI mode · ${n} target server${n === 1 ? '' : 's'} · read-only checks run at once, changes wait for your approval · Enter to send`
-    : `Direct mode · runs exactly what you type on ${n} server${n === 1 ? '' : 's'} in parallel · Enter to run`;
+    : `Direct mode · runs exactly what you type on ${n} server${n === 1 ? '' : 's'} in parallel · Enter to run`);
 }
 
 function autoGrow() {
@@ -430,25 +612,158 @@ $('#prompt').addEventListener('keydown', (e) => {
   }
 });
 $('#btnSend').onclick = send;
-$('#btnStop').onclick = () => api('/api/ai/stop', {});
-function clearChat() {
-  $$('#chatInner > :not(#chatEmpty)').forEach((el) => el.remove());
-  $('#chatEmpty').hidden = false;
-  S.jobs.clear();
-  S.batches.clear();
-  S.chatFloor = Math.max(S.lastChat, S.chat ?? 0);
-  S.chat = null;
+$('#btnStop').onclick = () => api('/api/ai/stop', { win: S.win }).catch((err) => toast(err.message, 'bad'));
+
+/* ================================================================ chat windows */
+// Several chats work at the same time: each window has its own AI session on the backend, its own
+// conversation, targets and mode — e.g. one upgrades the web servers while another checks the
+// databases. Events carry their window id, so windows in the background keep updating.
+const MAX_WINS = 6;
+let RW = null; // the window being drawn into (an event may belong to a window that is not shown)
+const AW = () => S.wins.get(S.win); // the window shown
+const winName = (w) => w.title || `Chat ${[...S.wins.keys()].indexOf(w.id) + 1}`;
+
+function makeWin(saved = {}) {
+  const log = document.createElement('div');
+  log.className = 'win-log';
+  log.hidden = true;
+  $('#chatInner').appendChild(log);
+  const w = {
+    id: saved.id || `w${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    title: saved.title || '', chat: saved.chat ?? null, chatFloor: S.lastChat, favorite: !!saved.favorite,
+    jobs: new Map(), batches: new Map(), busy: false, state: 'idle', unseen: false,
+    target: saved.target || 'all', custom: new Set(saved.custom || []), mode: saved.mode || 'ai',
+    draft: '', scroll: 0, log,
+  };
+  S.wins.set(w.id, w);
+  return w;
+}
+function syncActive() { // the live target / mode belong to the window shown
+  const w = AW();
+  if (w) Object.assign(w, { target: S.target, custom: S.custom, mode: S.mode });
+}
+function saveWins() {
+  if (!S.wins.size) return;
+  syncActive();
+  store.set('wins', [...S.wins.values()].map((w) => ({
+    id: w.id, title: w.title, chat: w.chat, favorite: !!w.favorite, target: w.target === 'selected' ? 'all' : w.target, custom: [...w.custom], mode: w.mode,
+  })));
+  store.set('win', S.win);
+}
+function activateWin(id) {
+  const prev = AW();
+  if (prev) {
+    syncActive();
+    prev.draft = $('#prompt').value;
+    prev.scroll = $('#chat').scrollTop;
+    prev.log.hidden = true;
+  }
+  S.win = id;
+  const w = AW();
+  w.unseen = false;
+  w.log.hidden = false;
+  S.target = w.target;
+  S.custom = w.custom;
+  $('#prompt').value = w.draft;
+  autoGrow();
+  if (!$('#tpick').hidden) togglePicker(false);
+  setMode(w.mode);
+  renderTargets();
+  updateEmpty();
+  const c = $('#chat');
+  c.style.scrollBehavior = 'auto';
+  c.scrollTop = prev ? w.scroll : c.scrollHeight;
+  c.style.scrollBehavior = '';
+  saveWins();
+}
+async function newWin(focus = true) {
+  if (S.wins.size >= MAX_WINS) { toast(`At most ${MAX_WINS} chat windows — close one first`, 'bad'); return null; }
+  const w = makeWin();
+  try {
+    await api('/api/ai/windows', { win: w.id }); // starts its AI session now, so the first answer is quick
+  } catch (err) {
+    w.log.remove();
+    S.wins.delete(w.id);
+    toast(err.message, 'bad');
+    return null;
+  }
+  activateWin(w.id);
+  if (focus) $('#prompt').focus();
+  return w;
+}
+async function closeWin(id) {
+  const w = S.wins.get(id);
+  if (!w) return;
+  if (w.busy && !(await confirmBox(`Close ${winName(w)}?`, 'The AI is still working in this window. Closing it stops that work; the chat stays in History.'))) return;
+  try { await api(`/api/ai/windows/${encodeURIComponent(id)}`, undefined, 'DELETE'); } catch (err) { return toast(err.message, 'bad'); }
+  const order = [...S.wins.keys()];
+  const i = order.indexOf(id);
+  w.log.remove();
+  S.wins.delete(id);
+  if (!S.wins.size) makeWin({ id: 'main' });
+  if (S.win === id) { S.win = null; activateWin([...S.wins.keys()][Math.max(0, i - 1)]); } else { saveWins(); renderWinTabs(); }
+}
+
+function renderWinTabs() {
+  const el = $('#winTabs');
+  if (!el || !S.wins.size) return;
+  syncActive();
+  const tabs = [...S.wins.values()].map((w, i) => {
+    const st = w.busy ? (w.state === 'waiting' ? 'waiting' : 'busy') : w.unseen ? (w.state === 'error' ? 'error' : 'unseen') : '';
+    const ind = st === 'busy' ? '<span class="wspin"></span>' : `<span class="wdot ${st}"></span>`;
+    const n = idsFor(w.target, w.custom).length;
+    const why = { busy: 'working…', waiting: 'waiting for your approval', unseen: 'new results', error: 'failed' }[st] || 'idle';
+    return `<div class="wtab ${w.id === S.win ? 'on' : ''} ${st}" data-win="${esc(w.id)}" title="${esc(winName(w))} → ${esc(labelFor(w.target, w.custom))} · ${why}${i < 9 ? ` · Alt+${i + 1}` : ''}">
+      ${ind}${w.favorite ? `<span class="wt-star">${svg('star')}</span>` : ''}<span class="wt-name">${esc(winName(w))}</span><span class="wt-n" title="target servers">${n}</span>
+      <button class="wt-x" data-close title="Close this window">${svg('x')}</button></div>`;
+  }).join('');
+  const hint = S.wins.size === 1 ? '<span class="wtabs-hint">Open another window to work on other servers at the same time</span>' : '';
+  el.innerHTML = tabs + `<button class="wtab-add" data-add title="New chat window — works in parallel with the others (Alt+N)" ${S.wins.size >= MAX_WINS ? 'disabled' : ''}>${svg('plus')}<span>New window</span></button>${hint}`;
+}
+$('#winTabs').addEventListener('click', (e) => {
+  if (e.target.closest('[data-add]')) return newWin();
+  const tab = e.target.closest('[data-win]');
+  if (!tab) return;
+  if (e.target.closest('[data-close]')) return closeWin(tab.dataset.win);
+  if (tab.dataset.win !== S.win) activateWin(tab.dataset.win);
+});
+$('#winTabs').addEventListener('auxclick', (e) => { // middle click closes, like browser tabs
+  const tab = e.target.closest('[data-win]');
+  if (tab && e.button === 1) closeWin(tab.dataset.win);
+});
+document.addEventListener('keydown', (e) => {
+  if (S.view !== 'ai' || !e.altKey || e.ctrlKey || e.metaKey) return;
+  if (/^[1-9]$/.test(e.key)) {
+    const id = [...S.wins.keys()][+e.key - 1];
+    if (id) { e.preventDefault(); activateWin(id); }
+  } else if (e.key.toLowerCase() === 'n') { e.preventDefault(); newWin(); }
+});
+
+function updateEmpty() { $('#chatEmpty').hidden = !!AW()?.log.childElementCount; }
+
+function clearChat(w = AW()) {
+  w.log.replaceChildren();
+  w.jobs.clear();
+  w.batches.clear();
+  w.chatFloor = Math.max(S.lastChat, w.chat ?? 0);
+  Object.assign(w, { chat: null, title: '', state: 'idle', unseen: false, favorite: false });
+  updateEmpty();
+  saveWins();
+  renderWinTabs();
 }
 
 /* ---------------------------------------------------------------- chat history */
-async function openChat(id) {
-  const chat = await api(`/api/chats/${id}/open`, {});
-  clearChat();
-  S.chat = chat.id;
+async function openChat(id, w = AW(), restoreTargets = true) {
+  const chat = await api(`/api/chats/${id}/open`, { win: w.id });
+  clearChat(w);
+  w.chat = chat.id;
+  w.title = chat.title || '';
+  w.favorite = !!chat.favorite;
   S.lastChat = Math.max(S.lastChat, chat.id);
+  RW = w;
   for (const ev of chat.events) chatEvent(ev, true);
   // steps that never reported back (stopped, app closed) stop spinning
-  const states = [...S.batches.values(), ...[...S.jobs.values()].flatMap((j) => [...j.rounds.values()])];
+  const states = [...w.batches.values(), ...[...w.jobs.values()].flatMap((j) => [...j.rounds.values()])];
   for (const st of states) {
     for (const r of st.rows.values()) {
       if (r.got >= r.expected) continue;
@@ -457,7 +772,110 @@ async function openChat(id) {
       if (!r.got) $('.rpreview', r.row).textContent = 'not run';
     }
   }
-  forceScroll();
+  updateEmpty();
+  if (restoreTargets) {
+    const last = [...chat.events].reverse().find((ev) => ev.type === 'chat.user');
+    const sc = scopeOf(last);
+    if (applyScope(w, sc)) {
+      toast(`Servers of this chat selected: ${labelFor(w.target, w.custom)}${sc.lost ? ` (${sc.lost} no longer exist)` : ''}`, 'ok');
+    } else if (last) toast('The servers this chat used no longer exist — pick targets above', 'bad');
+  }
+  saveWins();
+  renderWinTabs();
+  if (w === AW()) forceScroll();
+}
+
+/* ---- a chat remembers its servers: reopening it targets them again */
+function scopeNow(ids) {
+  return { spec: S.target === 'selected' ? 'custom' : S.target, ids };
+}
+function scopeOf(ev) {
+  if (!ev) return null;
+  const sc = ev.scope;
+  if (sc) {
+    const spec = sc.spec || '';
+    if (spec === 'all') return { target: 'all' };
+    if (spec.startsWith('folder:') && folders().includes(spec.slice(7))) return { target: spec };
+    if (spec.startsWith('server:') && S.servers.has(+spec.slice(7))) return { target: spec };
+    const want = sc.ids || [];
+    const ids = want.filter((id) => S.servers.has(id));
+    return ids.length ? { target: 'custom', custom: ids, lost: want.length - ids.length } : null;
+  }
+  const label = ev.target || ''; // chats from before this kept only the label
+  if (label === 'All servers') return { target: 'all' };
+  if (label.startsWith('Folder: ') && folders().includes(label.slice(8))) return { target: `folder:${label.slice(8)}` };
+  const one = serverList().find((x) => x.name === label);
+  return one ? { target: `server:${one.id}` } : null;
+}
+function applyScope(w, sc) {
+  if (!sc) return false;
+  w.target = sc.target;
+  if (sc.custom) w.custom = new Set(sc.custom);
+  if (w === AW()) {
+    S.target = w.target;
+    S.custom = w.custom;
+    renderTargets();
+  }
+  saveWins();
+  return true;
+}
+
+// Open a chat from History / Favorites: a chat already open just shows its window; a window that is
+// working keeps its chat and the old one opens in a new window next to it.
+async function openFromList(id, { newWindow = false, prefill = null } = {}) {
+  const holder = [...S.wins.values()].find((x) => x.chat === id);
+  if (holder) activateWin(holder.id);
+  else {
+    const w = newWindow || AW().busy ? await newWin(false) : AW();
+    if (!w) return;
+    await openChat(id, w);
+    if (w !== AW()) activateWin(w.id);
+  }
+  if (prefill != null) {
+    $('#prompt').value = prefill;
+    autoGrow();
+    const t = $('#prompt');
+    t.focus();
+    t.setSelectionRange(t.value.length, t.value.length);
+  }
+}
+async function setFavorite(id, favorite) {
+  await api(`/api/chats/${id}`, { favorite }, 'PATCH');
+  S.wins.forEach((x) => { if (x.chat === id) x.favorite = favorite; });
+  renderWinTabs();
+  toast(favorite ? 'Added to favorites — kept forever, reopens with the same servers' : 'Removed from favorites', 'ok');
+}
+// Inline rename: the title turns into an input; Enter saves, Esc cancels.
+function renameInline(titleEl, chat, done) {
+  const input = document.createElement('input');
+  input.className = 'rename-in';
+  input.value = chat.title;
+  input.maxLength = 120;
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+  let finished = false;
+  const finish = async (save) => {
+    if (finished) return;
+    finished = true;
+    const title = input.value.trim();
+    if (save && title && title !== chat.title) {
+      try {
+        await api(`/api/chats/${chat.id}`, { title }, 'PATCH');
+        S.wins.forEach((x) => { if (x.chat === chat.id) x.title = title; });
+        renderWinTabs();
+        saveWins();
+      } catch (err) { toast(err.message, 'bad'); }
+    }
+    done();
+  };
+  input.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') finish(true);
+    if (e.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
+  input.addEventListener('click', (e) => e.stopPropagation());
 }
 
 function ago(ts) {
@@ -468,91 +886,184 @@ function ago(ts) {
   return `${Math.round(min / 1440)} d ago`;
 }
 
+function chatRow(c, days, winOf) {
+  const w = winOf.get(c.id);
+  const here = w && w.id === S.win;
+  const left = Math.max(0, Math.ceil(days - (Date.now() - new Date(c.updated_at)) / 86400000));
+  const where = c.last?.target ? ` · → ${esc(c.last.target)}` : '';
+  return `<div class="hrow ${here ? 'on' : ''} ${c.favorite ? 'fav' : ''}" data-id="${c.id}">
+    <button class="hstar ${c.favorite ? 'on' : ''}" data-star title="${c.favorite ? 'Remove from favorites' : 'Add to favorites (kept forever)'}">${svg('star')}</button>
+    <div class="hmain"><div class="htitle">${esc(c.title)}</div>
+    <div class="hmeta">${esc(ago(c.updated_at))} · ${c.messages} message${c.messages === 1 ? '' : 's'}${where} · ${c.favorite ? 'kept forever' : `expires in ${left} d`}${w ? ` · <b>open in ${here ? 'this window' : esc(winName(w))}</b>` : ''}</div></div>
+    <button class="btn btn-ghost btn-icon btn-sm" data-rename title="Rename">${icon('edit')}</button>
+    ${w ? '' : `<button class="btn btn-ghost btn-icon btn-sm" data-new title="Open in a new chat window">${icon('plus')}</button>`}
+    <button class="btn btn-ghost btn-icon btn-sm" data-del title="Delete this chat">${icon('trash')}</button></div>`;
+}
+
+const hist = { q: '' };
 async function showHistory() {
-  const { chats, current, days } = await api('/api/chats');
-  $('#historySub').textContent = `Each chat is kept for ${days} days after its last message`;
+  const { chats, days } = await api('/api/chats');
+  const winOf = new Map([...S.wins.values()].filter((w) => w.chat != null).map((w) => [w.chat, w]));
+  $('#historySub').textContent = `Chats are kept for ${days} days after their last message — favorites (★) forever`;
   const body = $('#historyBody');
-  body.innerHTML = chats.length
-    ? chats.map((c) => `<div class="hrow ${c.id === current ? 'on' : ''}" data-id="${c.id}">
-        <div class="hmain"><div class="htitle">${esc(c.title)}</div>
-        <div class="hmeta">${esc(ago(c.updated_at))} · ${c.messages} message${c.messages === 1 ? '' : 's'} · expires in ${Math.max(0, Math.ceil(days - (Date.now() - new Date(c.updated_at)) / 86400000))} d${c.id === current ? ' · <b>open now</b>' : ''}</div></div>
-        <button class="btn btn-ghost btn-icon btn-sm" data-del title="Delete this chat">${icon('trash')}</button></div>`).join('')
-    : '<p class="muted">No chats yet. Your conversations show up here.</p>';
+  const draw = () => {
+    const q = hist.q.trim().toLowerCase();
+    const shown = chats.filter((c) => !q || [c.title, c.last?.text, c.last?.target].some((v) => String(v || '').toLowerCase().includes(q)));
+    const favs = shown.filter((c) => c.favorite);
+    const rest = shown.filter((c) => !c.favorite);
+    const section = (title, list) => (list.length ? `<div class="hsec">${title}</div>${list.map((c) => chatRow(c, days, winOf)).join('')}` : '');
+    body.innerHTML = `<label class="search hsearch">${icon('search')}<input id="histQ" placeholder="Search chats…" value="${esc(hist.q)}" autocomplete="off"></label>`
+      + (shown.length ? section('★ Favorites', favs) + section(favs.length ? 'Recent' : '', rest)
+        : `<p class="muted">${chats.length ? 'No chat matches.' : 'No chats yet. Your conversations show up here.'}</p>`);
+    const qi = $('#histQ');
+    qi.oninput = () => { hist.q = qi.value; draw(); const again = $('#histQ'); again.focus(); again.setSelectionRange(again.value.length, again.value.length); };
+  };
+  draw();
   body.onclick = async (e) => {
     const row = e.target.closest('.hrow');
     if (!row) return;
     const id = Number(row.dataset.id);
+    const chat = chats.find((c) => c.id === id);
     try {
+      if (e.target.closest('[data-star]')) {
+        chat.favorite = !chat.favorite;
+        await setFavorite(id, chat.favorite);
+        return draw();
+      }
+      if (e.target.closest('[data-rename]')) return renameInline($('.htitle', row), chat, () => showHistory());
       if (e.target.closest('[data-del]')) {
-        if (!(await confirmBox('Delete chat?', 'This chat and its results are removed for good. The audit log keeps its commands.'))) return;
+        if (!(await confirmBox('Delete chat?', `${chat.favorite ? 'This is a favorite. ' : ''}This chat and its results are removed for good. The audit log keeps its commands.`))) return;
         await api(`/api/chats/${id}`, undefined, 'DELETE');
-        if (id === S.chat) clearChat();
+        const w = winOf.get(id);
+        if (w) clearChat(w);
         return showHistory();
       }
+      if (e.target.closest('input')) return;
       closeModals();
-      await openChat(id);
+      await openFromList(id, { newWindow: !!e.target.closest('[data-new]') });
     } catch (err) { toast(err.message, 'bad'); }
   };
   $('#historyModal').hidden = false;
 }
+
+/* ---- Favorites: one click back into a saved chat, with its servers selected */
+async function showFavs() {
+  const pop = $('#favPop');
+  const { chats } = await api('/api/chats');
+  const favs = chats.filter((c) => c.favorite);
+  const w = AW();
+  const cur = w.chat != null ? chats.find((c) => c.id === w.chat) : null;
+  const top = cur
+    ? `<button class="fav-cur ${cur.favorite ? 'on' : ''}" data-cur>${svg('star')}<span>${cur.favorite ? 'This chat is a favorite — remove' : 'Add this chat to favorites'}</span></button>`
+    : '<div class="fav-note">Send a message, then star the chat to keep it here.</div>';
+  pop.innerHTML = `<div class="fav-head"><b>Favorites</b><span class="muted">kept forever · reopen with the same servers</span></div>${top}
+    <div class="fav-list">${favs.length ? favs.map((c) => `<div class="fav-row" data-id="${c.id}" title="Open — its servers are selected again">
+      <div class="fav-main"><div class="fav-title">${esc(c.title)}</div>
+        <div class="fav-meta">${c.last?.target ? `→ ${esc(c.last.target)} · ` : ''}${esc(ago(c.updated_at))}</div></div>
+      ${c.last?.text ? `<button class="btn btn-ghost btn-sm" data-again title="Open it and put its last request in the box: ${esc(c.last.text.slice(0, 120))}">${icon('reconnect')}Ask again</button>` : ''}
+      <button class="btn btn-ghost btn-icon btn-sm" data-unstar title="Remove from favorites">${svg('star')}</button></div>`).join('')
+    : '<div class="fav-empty">No favorites yet. Star a chat here or in History.</div>'}</div>`;
+  pop.hidden = false;
+  pop.onclick = async (e) => {
+    try {
+      if (e.target.closest('[data-cur]')) { await setFavorite(cur.id, !cur.favorite); return showFavs(); }
+      const row = e.target.closest('.fav-row');
+      if (!row) return;
+      const id = Number(row.dataset.id);
+      const c = favs.find((x) => x.id === id);
+      if (e.target.closest('[data-unstar]')) { await setFavorite(id, false); return showFavs(); }
+      pop.hidden = true;
+      await openFromList(id, { prefill: e.target.closest('[data-again]') ? c.last.text : null });
+    } catch (err) { toast(err.message, 'bad'); }
+  };
+}
+$('#btnFavs').onclick = () => ($('#favPop').hidden ? showFavs().catch((err) => toast(err.message, 'bad')) : ($('#favPop').hidden = true));
+document.addEventListener('mousedown', (e) => {
+  if (!$('#favPop').hidden && !e.target.closest('#favPop') && !e.target.closest('#btnFavs')) $('#favPop').hidden = true;
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#favPop').hidden) $('#favPop').hidden = true; });
+
 $('#btnHistory').onclick = () => showHistory().catch((err) => toast(err.message, 'bad'));
 $('#btnNewChat').onclick = async () => {
-  await api('/api/ai/reset', {});
-  clearChat();
-  toast('Fresh AI conversation started', 'ok');
+  const w = AW();
+  if (w.busy) return toast('The AI is still working in this window — stop it, or open a new window', 'bad');
+  try {
+    await api('/api/ai/reset', { win: w.id });
+    clearChat(w);
+    toast('Fresh AI conversation started', 'ok');
+  } catch (err) { toast(err.message, 'bad'); }
 };
 
+function busyUI() {
+  const w = AW();
+  if (!w) return;
+  $('#btnStop').hidden = !w.busy;
+  $('#btnSend').disabled = w.busy && S.mode === 'ai';
+}
 function setBusy(busy) {
-  S.aiBusy = busy;
-  $('#btnStop').hidden = !busy;
-  $('#btnSend').disabled = busy && S.mode === 'ai';
+  RW.busy = busy;
+  if (!busy && RW !== AW()) RW.unseen = true;
+  busyUI();
+  renderWinTabs();
 }
 
 function scrollChat() {
+  if (RW && RW !== AW()) return;
   const c = $('#chat');
   if (c.scrollHeight - c.scrollTop - c.clientHeight < 260) c.scrollTop = c.scrollHeight;
 }
-function forceScroll() { const c = $('#chat'); c.scrollTop = c.scrollHeight; }
+function forceScroll() { if (RW && RW !== AW()) return; const c = $('#chat'); c.scrollTop = c.scrollHeight; }
 
 function addBlock(kind) {
-  $('#chatEmpty').hidden = true;
   const block = document.createElement('div');
   block.className = 'ai-block';
   block.innerHTML = `<div class="ai-avatar ${kind === 'direct' ? 'direct' : ''}">${icon(kind === 'direct' ? 'terminal' : 'sparkles')}</div><div class="ai-col"></div>`;
-  $('#chatInner').appendChild(block);
+  RW.log.appendChild(block);
+  updateEmpty();
   return $('.ai-col', block);
 }
 
 async function send() {
   const text = $('#prompt').value.trim();
   if (!text) return;
+  const w = AW();
   const ids = targetIds();
   if (!ids.length) return toast('No target servers selected', 'bad');
   const target = targetLabel();
   const user = userBubble({ mode: S.mode, text, target });
-  $('#chatEmpty').hidden = true;
   if (S.mode === 'ai') {
     if (S.meta.agy === null && !S.meta.codex) { $('#agyMissing').hidden = false; return toast('AI chat needs the AGY CLI or ChatGPT (Codex CLI) — install one first', 'bad'); }
-    if (S.aiBusy) return toast('The AI is still working — stop it or wait', 'bad');
+    if (w.busy) return toast('The AI is still working in this window — wait, stop it, or open a new window (Alt+N)', 'bad');
+    RW = w;
+    w.log.appendChild(user);
+    const col = addBlock('ai');
+    w.state = 'thinking';
+    if (!w.title) w.title = text.slice(0, 48);
+    setBusy(true);
     try {
-      $('#chatInner').appendChild(user);
-      const col = addBlock('ai');
-      setBusy(true);
-      const { job } = await api('/api/ai/ask', { prompt: text, ids: S.target === 'all' ? [] : ids, target });
-      S.jobs.set(job, { col, rounds: new Map(), statusEl: null, servers: ids.length });
+      const { job } = await api('/api/ai/ask', { win: w.id, prompt: text, ids: S.target === 'all' ? [] : ids, target, scope: scopeNow(ids) });
+      RW = w;
+      if (!w.jobs.has(job)) w.jobs.set(job, { col, rounds: new Map(), statusEl: null, servers: ids.length });
+      else col.parentElement.remove(); // its first event arrived before this reply and drew the job already
       setStatus(job, 'thinking');
     } catch (err) {
+      RW = w;
       setBusy(false);
       toast(err.message, 'bad');
       return;
     }
   } else {
-    $('#chatInner').appendChild(user);
-    api('/api/exec', { command: text, ids, target }).catch((err) => toast(err.message, 'bad'));
+    w.log.appendChild(user);
+    updateEmpty();
+    if (!w.title) w.title = text.slice(0, 48);
+    renderWinTabs();
+    api('/api/exec', { win: w.id, command: text, ids, target, scope: scopeNow(ids) }).catch((err) => toast(err.message, 'bad'));
   }
   remember(text);
-  $('#prompt').value = '';
-  autoGrow();
+  if (w === AW()) { $('#prompt').value = ''; autoGrow(); }
+  w.draft = '';
+  saveWins();
+  RW = w;
   forceScroll();
 }
 
@@ -565,12 +1076,14 @@ function userBubble(ev) {
 
 // A job seen without a block of its own (reopened chat, or a page reload mid-job) gets one here.
 function ensureJob(id) {
-  if (!S.jobs.has(id)) S.jobs.set(id, { col: addBlock('ai'), rounds: new Map(), statusEl: null });
-  return S.jobs.get(id);
+  if (!RW.jobs.has(id)) RW.jobs.set(id, { col: addBlock('ai'), rounds: new Map(), statusEl: null });
+  return RW.jobs.get(id);
 }
 
 function setStatus(jobId, state, text, model, why) {
-  const job = S.jobs.get(jobId);
+  const working = ['thinking', 'running', 'waiting'].includes(state);
+  if (!working && RW.busy) setBusy(false); // also when the job is not drawn (e.g. a page reload mid-job)
+  const job = RW.jobs.get(jobId);
   if (!job) return;
   if (!job.statusEl) { job.statusEl = document.createElement('div'); job.statusEl.className = 'thinking'; }
   const who = model || brainName(); // the model actually working (under Auto it changes per request)
@@ -584,7 +1097,6 @@ function setStatus(jobId, state, text, model, why) {
     job.col.appendChild(job.statusEl);
   } else {
     job.statusEl.remove();
-    setBusy(false);
   }
   scrollChat();
 }
@@ -685,11 +1197,15 @@ function renderPlan(ev, replay) {
       <button class="btn btn-ghost btn-sm" data-a="no">Cancel</button>
       ${canary ? '<button class="btn btn-sm" data-a="all">Run on all at once</button>' : ''}
       <button class="btn btn-warn btn-sm" data-a="${canary ? 'canary' : 'all'}">${icon('check')}${canary ? 'Approve · canary first' : 'Approve & run'}</button>`;
+    bar.live = bar.innerHTML;
+    const win = RW.id;
     bar.addEventListener('click', async (e) => {
       const a = e.target.closest('[data-a]')?.dataset.a;
-      if (!a) return;
-      await api('/api/ai/approve', { approve: a !== 'no', mode: a === 'all' ? 'parallel' : 'canary' });
-      markDecision(bar, a !== 'no', a === 'all' ? 'parallel' : 'canary');
+      if (!a || bar.classList.contains('done')) return;
+      try {
+        await api('/api/ai/approve', { win, approve: a !== 'no', mode: a === 'all' ? 'parallel' : 'canary' });
+        markDecision(bar, a !== 'no', a === 'all' ? 'parallel' : 'canary');
+      } catch (err) { toast(err.message, 'bad'); }
     });
     // a reopened chat: the request is over; an ai.decision event that follows fills in the answer
     if (replay) {
@@ -811,28 +1327,41 @@ function onEvent(ev) {
   }
   if (ev.chat == null) return;
   S.lastChat = Math.max(S.lastChat, ev.chat);
+  const w = S.wins.get(ev.win || 'main');
+  if (!w) return; // a window closed here
   // the first message of a new chat just created it (chat ids only grow, so a late event of the
   // chat that was just closed cannot claim the new one)
-  if (S.chat == null && ev.chat > S.chatFloor) S.chat = ev.chat;
-  if (ev.chat !== S.chat) return; // another chat (e.g. one still running when you switched away)
-  if (ev.type === 'ai.status') return setStatus(ev.job, ev.state, ev.text, ev.model, ev.why);
+  if (w.chat == null && ev.chat > w.chatFloor) { w.chat = ev.chat; saveWins(); }
+  if (ev.chat !== w.chat) return; // another chat (e.g. one still running when you switched away)
+  RW = w;
+  const shown = w === AW();
+  if (ev.type === 'ai.status') {
+    const was = w.state;
+    w.state = ev.state;
+    if (ev.state === 'waiting' && was !== 'waiting' && !shown) toast(`${winName(w)} is waiting for your approval`, 'info');
+    if (ev.state === 'error' && !shown) w.unseen = true;
+    setStatus(ev.job, ev.state, ev.text, ev.model, ev.why);
+    return renderWinTabs();
+  }
+  if (!shown && ['ai.answer', 'ai.error', 'exec.result'].includes(ev.type)) w.unseen = true;
   chatEvent(ev, false);
+  if (!shown) renderWinTabs();
 }
 
 // Draws one chat event; used live and to replay a reopened chat from its history.
 function chatEvent(ev, replay) {
   switch (ev.type) {
     case 'chat.user':
-      $('#chatEmpty').hidden = true;
-      return $('#chatInner').appendChild(userBubble(ev));
+      RW.log.appendChild(userBubble(ev));
+      return updateEmpty();
     case 'ai.plan': return renderPlan(ev, replay);
     case 'ai.decision': {
-      const bar = S.jobs.get(ev.job)?.rounds.get(ev.round)?.approveBar;
+      const bar = RW.jobs.get(ev.job)?.rounds.get(ev.round)?.approveBar;
       if (bar) markDecision(bar, ev.approve, ev.mode);
       return;
     }
     case 'ai.result': {
-      const job = S.jobs.get(ev.job);
+      const job = RW.jobs.get(ev.job);
       const state = job?.rounds.get(ev.round);
       if (state) applyResult(state, ev);
       return;
@@ -850,11 +1379,11 @@ function chatEvent(ev, replay) {
       const col = addBlock('direct');
       const state = resultsPanel(`$ ${ev.command}`, ev.servers.map((s) => ({ ...s, count: 1 })));
       col.appendChild(state.panel);
-      S.batches.set(ev.batch, state);
+      RW.batches.set(ev.batch, state);
       return forceScroll();
     }
     case 'exec.result': {
-      const state = S.batches.get(ev.batch);
+      const state = RW.batches.get(ev.batch);
       if (state) applyResult(state, ev);
       return;
     }
@@ -1257,7 +1786,7 @@ $('#modelSel').onchange = async (e) => {
   try {
     const { model } = await api('/api/ai/model', { model: sel.value });
     S.meta.model = model;
-    clearChat();
+    S.wins.forEach((w) => clearChat(w)); // every window starts fresh on the new model
     $('#autoPill').hidden = model !== AUTO;
     if (model === AUTO) loadModels(); // shows the fast / smart models Auto will use
     toast(`AI model: ${sel.selectedOptions[0].textContent} — new chat started`, 'ok');
@@ -1282,9 +1811,35 @@ $('#autoSmart').onchange = saveAuto;
 
 $('#agyInstallLink').onclick = () => api('/api/open', { url: S.meta.agy_install_url }).catch((err) => toast(err.message, 'bad'));
 
+// Windows come back after a reload or restart, each with its chat and targets. The backend's own
+// state wins (a window still working shows its live progress and a pending approval).
+async function restoreWins() {
+  const live = S.meta.windows || {};
+  for (const w of S.wins.values()) {
+    const st = live[w.id];
+    const chat = st ? st.chat : w.chat;
+    if (chat) {
+      try { await openChat(chat, w, false); } catch { clearChat(w); }
+    } else if (w.chat) clearChat(w);
+    if (st?.busy) {
+      RW = w;
+      w.state = st.waiting ? 'waiting' : 'running';
+      setBusy(true);
+      if (st.waiting) { // the approval it waits for can still be given
+        const job = [...w.jobs.values()].pop();
+        const bar = job && [...job.rounds.values()].pop()?.approveBar;
+        if (bar?.live) { bar.classList.remove('done'); bar.innerHTML = bar.live; }
+      }
+    }
+  }
+  renderWinTabs();
+}
+
 async function boot() {
   hydrateIcons();
-  setMode('ai');
+  for (const saved of store.get('wins', [])) if (saved?.id && S.wins.size < MAX_WINS) makeWin(saved);
+  if (!S.wins.size) makeWin({ id: 'main' });
+  activateWin(S.wins.has(store.get('win')) ? store.get('win') : [...S.wins.keys()][0]);
   showView('overview');
   connectEvents();
   try {
@@ -1300,7 +1855,7 @@ async function boot() {
     } else {
       loadModels();
     }
-    if (S.meta.chat) await openChat(S.meta.chat); // page reload: show the conversation that is still open
+    await restoreWins();
   } catch (err) {
     toast(err.message, 'bad');
   }

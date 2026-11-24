@@ -20,7 +20,7 @@ from sshpro import __version__
 from sshpro.agy import AGY_INSTALL_URL, AIError, agy_available
 from sshpro.codex import codex_available
 from sshpro.backup import export_backup, import_backup
-from sshpro.brain import Brain
+from sshpro.brain import Windows
 from sshpro.db import Database
 from sshpro.importer import import_termix
 from sshpro.paths import TERMIX_DB, WEB_DIR, data_dir
@@ -39,7 +39,8 @@ class Backend:
         self.token = token or secrets.token_urlsafe(24)
         self.ssh = SSHManager(db)
         self.clients: set[web.WebSocketResponse] = set()
-        self.brain = Brain(db, self.ssh, self.emit)
+        self.windows = Windows(db, self.ssh, self.emit)  # chat windows that work at the same time
+        self.brain = self.windows.main
         self._tasks: set[asyncio.Task] = set()
         self.errors: dict[int, str] = {}  # last connection error per server (not persisted)
 
@@ -92,12 +93,15 @@ class Backend:
         r.add_post("/api/ai/approve", self.ai_approve)
         r.add_post("/api/ai/stop", self.ai_stop)
         r.add_post("/api/ai/reset", self.ai_reset)
+        r.add_post("/api/ai/windows", self.ai_open_window)
+        r.add_delete("/api/ai/windows/{win}", self.ai_close_window)
         r.add_get("/api/ai/models", self.ai_models)
         r.add_post("/api/ai/model", self.ai_set_model)
         r.add_post("/api/ai/auto", self.ai_set_auto)
         r.add_get("/api/chats", self.list_chats)
         r.add_post("/api/chats/{id}/open", self.open_chat)
         r.add_delete("/api/chats/{id}", self.delete_chat)
+        r.add_patch("/api/chats/{id}", self.update_chat)
         r.add_get("/ws/events", self.ws_events)
         r.add_get("/ws/term", self.ws_term)
         app.on_shutdown.append(self._shutdown)
@@ -129,7 +133,7 @@ class Backend:
     async def _shutdown(self, app: web.Application) -> None:
         for ws in list(self.clients):
             await ws.close()
-        await self.brain.close()
+        await self.windows.close()
         await self.ssh.close()
 
     # ---- pages / meta --------------------------------------------------------------------
@@ -142,7 +146,7 @@ class Backend:
             "version": __version__, "model": self.brain.model, "agy": agy_available(), "codex": codex_available(),
             "agy_install_url": AGY_INSTALL_URL, "data_dir": str(data_dir()),
             "termix_db": str(TERMIX_DB) if TERMIX_DB.is_file() else None, "ssh_exe": shutil.which("ssh"),
-            "chat": self.brain.chat, "chat_days": CHAT_DAYS,
+            "chat": self.brain.chat, "chat_days": CHAT_DAYS, "windows": self.windows.state(),
         })
 
     # ---- servers -------------------------------------------------------------------------
@@ -235,7 +239,7 @@ class Backend:
         ids = [int(i) for i in body.get("ids") or []]
         if not command or not ids:
             raise ValueError("command and servers are required")
-        self.spawn(self.brain.direct(command, ids, _target(body)))
+        self.spawn(self.windows.get(body.get("win")).direct(command, ids, _target(body), _scope(body)))
         return web.json_response({"ok": True})
 
     async def ai_ask(self, request: web.Request) -> web.Response:
@@ -244,24 +248,36 @@ class Backend:
         if not prompt:
             raise ValueError("empty prompt")
         ids = [int(i) for i in body.get("ids") or []] or None
-        job_id = self.brain.ask(prompt, ids, _target(body))
+        job_id = self.windows.get(body.get("win")).ask(prompt, ids, _target(body), _scope(body))
         return web.json_response({"job": job_id})
 
     async def ai_approve(self, request: web.Request) -> web.Response:
         body = await request.json()
-        self.brain.approve(bool(body.get("approve")), body.get("mode") or "canary")
+        self.windows.get(body.get("win"), create=False).approve(bool(body.get("approve")), body.get("mode") or "canary")
         return web.json_response({"ok": True})
 
     async def ai_stop(self, request: web.Request) -> web.Response:
-        await self.brain.stop()
+        body = await request.json() if request.can_read_body else {}
+        await self.windows.get(body.get("win"), create=False).stop()
         return web.json_response({"ok": True})
 
     async def ai_reset(self, request: web.Request) -> web.Response:
-        await self.brain.new_chat()
+        body = await request.json() if request.can_read_body else {}
+        await self.windows.get(body.get("win")).new_chat()
+        return web.json_response({"ok": True})
+
+    async def ai_open_window(self, request: web.Request) -> web.Response:
+        """A new chat window: its AI session starts warming up now, so its first answer is quick."""
+        body = await request.json() if request.can_read_body else {}
+        self.windows.get(body.get("win")).warm_up()
+        return web.json_response({"ok": True, "windows": self.windows.state()})
+
+    async def ai_close_window(self, request: web.Request) -> web.Response:
+        await self.windows.close_window(request.match_info["win"])
         return web.json_response({"ok": True})
 
     async def ai_models(self, request: web.Request) -> web.Response:
-        models = await self.brain.models()
+        models = await self.windows.models()
         return web.json_response({"models": models, "current": self.brain.model,
                                   "auto": await self.brain.auto_models()})
 
@@ -274,7 +290,7 @@ class Backend:
 
     async def ai_set_model(self, request: web.Request) -> web.Response:
         body = await request.json()
-        await self.brain.set_model(self._model_id(body.get("model")))
+        await self.windows.set_model(self._model_id(body.get("model")))
         return web.json_response({"ok": True, "model": self.brain.model})
 
     async def ai_set_auto(self, request: web.Request) -> web.Response:
@@ -282,24 +298,30 @@ class Backend:
         fast, smart = self._model_id(body.get("fast")), self._model_id(body.get("smart"))
         if AUTO in (fast, smart):
             raise ValueError("Auto needs real models")
-        await self.brain.set_auto(fast, smart)
+        await self.windows.set_auto(fast, smart)
         return web.json_response({"ok": True, "auto": self.brain.auto})
 
     # ---- chat history --------------------------------------------------------------------
 
     async def list_chats(self, request: web.Request) -> web.Response:
-        return web.json_response({"chats": self.db.list_chats(), "current": self.brain.chat, "days": CHAT_DAYS})
+        open_in = {str(b.chat): w for w, b in self.windows if b.chat is not None}  # chat id -> window showing it
+        return web.json_response({"chats": self.db.list_chats(), "current": self.brain.chat, "open": open_in,
+                                  "days": CHAT_DAYS})
 
     async def open_chat(self, request: web.Request) -> web.Response:
-        chat_id = int(request.match_info["id"])
-        if self.brain.busy and chat_id != self.brain.chat:
-            raise RuntimeError("The AI is still working — stop it or wait")
-        return web.json_response(await self.brain.open_chat(chat_id))
+        body = await request.json() if request.can_read_body else {}
+        return web.json_response(await self.windows.open_chat(body.get("win"), int(request.match_info["id"])))
+
+    async def update_chat(self, request: web.Request) -> web.Response:
+        """Star / unstar a chat (favourites never expire) or rename it."""
+        body = await request.json()
+        favorite, title = body.get("favorite"), body.get("title")
+        self.db.update_chat(int(request.match_info["id"]), None if favorite is None else bool(favorite),
+                            None if title is None else str(title))
+        return web.json_response({"ok": True})
 
     async def delete_chat(self, request: web.Request) -> web.Response:
-        if self.brain.busy and int(request.match_info["id"]) == self.brain.chat:
-            raise RuntimeError("The AI is still working in this chat — stop it or wait")
-        await self.brain.delete_chat(int(request.match_info["id"]))
+        await self.windows.delete_chat(int(request.match_info["id"]))
         return web.json_response({"ok": True})
 
     # ---- websockets ----------------------------------------------------------------------
@@ -358,6 +380,17 @@ class Backend:
             reader.cancel()
             proc.close()
         return ws
+
+
+def _scope(body: dict) -> dict | None:
+    """The UI's target choice (a folder, hand-picked servers, ...), kept with the message so
+    reopening the chat selects the same servers."""
+    scope = body.get("scope")
+    if not isinstance(scope, dict):
+        return None
+    spec = str(scope.get("spec") or "")[:200]
+    ids = [int(i) for i in (scope.get("ids") or [])[:1000] if str(i).isdigit()]
+    return {"spec": spec, "ids": ids} if spec or ids else None
 
 
 def _target(body: dict) -> str | None:

@@ -89,13 +89,36 @@
           <div class="chips tchips" id="targetChips"></div>
           <select id="targetSel" title="Target one server"></select>
           <span class="target-info" id="targetInfo"></span>
+          <div class="tpick" id="tpick" hidden>
+            <div class="tpick-top">
+              <label class="search"><span class="i" data-icon="search"></span><input id="tpickQ" placeholder="Filter by name, host or folder…" autocomplete="off" spellcheck="false"></label>
+              <div class="tpick-quick">
+                <button data-q="all" title="Tick every server shown">All</button>
+                <button data-q="none" title="Untick every server shown">None</button>
+                <button data-q="online" title="Keep only the online servers among those shown">Online</button>
+                <button data-q="invert" title="Flip the selection of the servers shown">Invert</button>
+              </div>
+            </div>
+            <div class="tpick-sets" id="tpickSets"></div>
+            <div class="tpick-list" id="tpickList"></div>
+            <div class="tpick-foot">
+              <span id="tpickCount"></span>
+              <div class="grow"></div>
+              <button class="btn btn-primary btn-sm" id="tpickDone">Done</button>
+            </div>
+          </div>
         </div>
         <div class="grow"></div>
         <span class="model-pill" id="modelPill" title="AI model (live list from AGY and ChatGPT / Codex)"><span class="pulse"></span><span id="modelName">AI</span><select id="modelSel" hidden></select></span>
         <span class="model-pill auto-pill" id="autoPill" hidden title="Auto: quick checks and chat use the Fast model; troubleshooting, security, changes and long requests use the Smart model"><span>Fast</span><select id="autoFast"></select><span>Smart</span><select id="autoSmart"></select></span>
+        <span class="fav-wrap">
+          <button class="btn btn-ghost btn-sm" id="btnFavs" title="Favorite chats — reopen one with its servers selected"><span class="i" data-icon="star"></span>Favorites</button>
+          <div class="fav-pop" id="favPop" hidden></div>
+        </span>
         <button class="btn btn-ghost btn-sm" id="btnHistory" title="Earlier chats"><span class="i" data-icon="history"></span>History</button>
         <button class="btn btn-ghost btn-sm" id="btnNewChat" title="Start a fresh AI conversation"><span class="i" data-icon="plus"></span>New chat</button>
       </div>
+      <div class="wintabs" id="winTabs"></div>
       <div class="chat" id="chat">
         <div class="chat-inner" id="chatInner">
           <div class="empty" id="chatEmpty">

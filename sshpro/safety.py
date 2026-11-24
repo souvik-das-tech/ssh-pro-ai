@@ -519,6 +519,11 @@ _PRELUDE = (
 )
 
 
+def sudo_count(command: str) -> int:
+    """How many `sudo` calls the command line makes."""
+    return len(_SUDO.findall(command))
+
+
 def prepare(command: str, username: str, sudo_password: str | None) -> tuple[str, str | None]:
     """Return (remote command line, stdin text) for running `command` in a login bash.
 

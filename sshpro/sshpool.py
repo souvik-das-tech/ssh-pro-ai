@@ -22,7 +22,7 @@ import asyncssh
 
 from sshpro.db import Database
 from sshpro.localexec import expand
-from sshpro.safety import prepare
+from sshpro.safety import prepare, sudo_count
 
 log = logging.getLogger(__name__)
 logging.getLogger("asyncssh").setLevel(logging.WARNING)
@@ -37,6 +37,9 @@ PROBE = (
     "df -Pk / 2>/dev/null | awk 'NR==2{print \"disk=\"$2\" \"$4}'"
 )
 
+
+CHUNK = 256 * 1024  # server-to-server relay: bytes read from the source per write to the destination
+COPY_MARGIN = 64 * 1024 * 1024  # free space a copy must leave on the destination
 
 HAS_TAR = "command -v tar >/dev/null 2>&1 && command -v gzip >/dev/null 2>&1"
 # `sudo` is dropped for root and gets the stored sudo password otherwise (safety.prepare).
@@ -355,6 +358,210 @@ class SSHManager:
             if archive:
                 archive.unlink(missing_ok=True)
         return self._result(started, exit_code=0, stdout=f"downloaded {remote} -> {dest} ({note})")
+
+    # ---- server to server --------------------------------------------------------------------
+
+    async def _receiver(self, server_id: int, command: str) -> tuple[str, bytes]:
+        """Command line + stdin prefix for a process that reads streamed data on stdin.
+
+        A sudo password goes in front of the data (sudo -S reads it byte by byte, so what follows
+        reaches the command intact). When sudo needs no password (NOPASSWD) it must get none, or
+        that line would end up inside the data, so that is checked first.
+        """
+        server = self.db.get_server(server_id)
+        if server is None:
+            raise SSHError("Server not found.")
+        password = None
+        if sudo_count(command) and server["username"] != "root":
+            check = await self.run(server_id, "sudo -n true", timeout=20, raw=True)
+            if check["error"]:
+                raise SSHError(check["error"])
+            if check["exit"] != 0:
+                if sudo_count(command) > 1:
+                    raise SSHError("The receiving command may use sudo only once; wrap it: sudo bash -c '…'")
+                password = self.sudo_password(server, self.db.get_secrets(server_id))
+        line, stdin = prepare("set -o pipefail; " + command, server["username"], password)
+        return line, (stdin or "").encode()
+
+    async def pipe(self, src_id: int, src_command: str, dst_id: int, dst_command: str,
+                   timeout: float = 6 * 3600,
+                   progress: Callable[[int, float], None] | None = None) -> dict[str, Any]:
+        """Stream the output of `src_command` on one server into `dst_command` on another, e.g.
+        `pg_dump -Fc db` into `pg_restore -d db`, or `tar -cf - dir` into `tar -xf -`.
+
+        The data is relayed through this app's own SSH connections (nothing is stored on this PC),
+        so the servers need no network path or SSH keys to each other. Both sides run with
+        `pipefail`; the result fails if either side fails.
+        """
+        started = time.monotonic()
+        src_server, dst_server = self.db.get_server(src_id), self.db.get_server(dst_id)
+        if src_server is None or dst_server is None:
+            return self._result(started, error="Server not found.")
+        procs: list[asyncssh.SSHClientProcess] = []
+        try:
+            dst_line, dst_prefix = await self._receiver(dst_id, dst_command)
+            src_line, src_stdin = prepare("set -o pipefail; " + src_command, src_server["username"],
+                                          self.sudo_password(src_server, self.db.get_secrets(src_id)))
+            dst = await (await self.connection(dst_id)).create_process(dst_line, encoding=None)
+            procs.append(dst)
+            src = await (await self.connection(src_id)).create_process(src_line, encoding=None)
+            procs.append(src)
+        except SSHError as exc:
+            for proc in procs:
+                proc.close()
+            return self._result(started, error=str(exc))
+        except (asyncssh.Error, OSError) as exc:
+            for proc in procs:
+                proc.close()
+            return self._result(started, error=_friendly(exc))
+
+        sent = 0
+
+        async def collect(stream: Any) -> bytes:
+            data = bytearray()
+            while chunk := await stream.read(65536):
+                data += chunk
+                del data[:-MAX_OUTPUT]
+            return bytes(data)
+
+        async def pump() -> None:
+            nonlocal sent
+            if src_stdin:
+                src.stdin.write(src_stdin.encode())
+            src.stdin.write_eof()
+            if dst_prefix:
+                dst.stdin.write(dst_prefix)
+            while chunk := await src.stdout.read(CHUNK):
+                dst.stdin.write(chunk)
+                await dst.stdin.drain()
+                sent += len(chunk)
+                if progress:
+                    progress(sent, time.monotonic() - started)
+            dst.stdin.write_eof()
+
+        readers = [asyncio.create_task(collect(src.stderr)), asyncio.create_task(collect(dst.stdout)),
+                   asyncio.create_task(collect(dst.stderr))]
+        error = None
+        try:
+            await asyncio.wait_for(pump(), timeout)
+            await asyncio.wait_for(asyncio.gather(src.wait_closed(), dst.wait_closed()), 900)
+        except asyncio.TimeoutError:
+            error = f"Timed out after {timeout:.0f}s"
+        except (BrokenPipeError, ConnectionResetError, asyncssh.Error, OSError) as exc:
+            error = f"The transfer broke off: {_friendly(exc) if isinstance(exc, asyncssh.Error) else exc}"
+        finally:
+            for proc in procs:
+                if proc.exit_status is None:
+                    proc.close()
+            await asyncio.gather(*(p.wait_closed() for p in procs), return_exceptions=True)
+        src_err, dst_out, dst_err = [_text(r) if not isinstance(r, BaseException) else ""
+                                     for r in await asyncio.gather(*readers, return_exceptions=True)]
+        if error and not dst_err and dst.exit_status not in (None, 0):
+            error = None  # the receiver failed: its own exit code and stderr say why
+        src_rc, dst_rc = src.exit_status, dst.exit_status
+        took = time.monotonic() - started
+        summary = (f"streamed {human_size(sent)} from {src_server['name']} to {dst_server['name']} in {took:.0f}s"
+                   f" ({human_size(sent / took if took else 0)}/s)")
+        stderr = "\n".join(x for x in (src_err and f"[{src_server['name']}] {src_err.strip()}",
+                                      dst_err and f"[{dst_server['name']}] {dst_err.strip()}") if x)
+        if src_rc not in (0, None) or dst_rc not in (0, None):
+            exit_code = src_rc if src_rc not in (0, None) else dst_rc
+            side = src_server["name"] if src_rc not in (0, None) else dst_server["name"]
+            stderr = f"failed on {side} (exit {exit_code})\n{stderr}".strip()
+        else:
+            exit_code = None if error else 0
+        return self._result(started, exit_code=exit_code, stdout=f"{summary}\n{dst_out}".strip(),
+                            stderr=stderr, error=error)
+
+    async def copy(self, src_id: int, src_path: str, dst_id: int, into: str, verify: str = "checksum",
+                   sudo: bool = False, overwrite: bool = False, timeout: float = 6 * 3600,
+                   progress: Callable[[int, float], None] | None = None) -> dict[str, Any]:
+        """Copy a file or folder from one server into a folder on another (`into` receives it,
+        like `cp -r`), keeping permissions, times and owners (owners need `sudo`).
+
+        Built to lose nothing: the source is only read; the destination's free space is checked
+        first; an existing target is never overwritten unless `overwrite`; afterwards both sides
+        are compared (file count, bytes and, with "checksum", a SHA-256 over every file) and any
+        difference fails the step.
+        """
+        started = time.monotonic()
+        q = shlex.quote
+        src_path = src_path.rstrip("/")
+        parent, name = posixpath.split(src_path)
+        if not src_path.startswith("/") or not into.startswith("/") or not name or name in (".", ".."):
+            return self._result(started, error="copy needs absolute paths, and the source must be a file or folder (not /)")
+        parent = parent or "/"
+        into = into.rstrip("/") or "/"
+        target = posixpath.join(into, name)
+        sudo_ = "sudo " if sudo else ""
+
+        def as_root(script: str) -> str:
+            return f"sudo bash -c {q('set -o pipefail; ' + script)}" if sudo else script
+
+        for sid in (src_id, dst_id):
+            if await self._ensure_tar(sid) is None:
+                return self._result(started, error=f"tar/gzip are missing on server {sid} and could not be installed")
+
+        # 1. before: the source exists; the destination has room and no target in the way
+        src_check, dst_check = await asyncio.gather(
+            self.run(src_id, f"{sudo_}test -e {q(src_path)} || {{ echo NOT_FOUND; exit 3; }}; "
+                             f"{sudo_}du -sk {q(src_path)} | cut -f1", timeout=1800),
+            self.run(dst_id, f'p={q(into)}; while [ ! -d "$p" ]; do p=$(dirname "$p"); done; '
+                             f'df -Pk "$p" | awk \'NR==2{{print $4}}\'; '
+                             f'if {sudo_}test -e {q(target)}; then echo EXISTS; fi', timeout=120))
+        for res, where in ((src_check, "source"), (dst_check, "destination")):
+            if res["error"]:
+                return self._result(started, error=f"{where}: {res['error']}")
+        if "NOT_FOUND" in src_check["stdout"]:
+            return self._result(started, exit_code=3, stderr=f"Not found on the source server: {src_path}")
+        if src_check["exit"] != 0:
+            return self._result(started, exit_code=src_check["exit"], stderr=f"Could not read the source: {src_check['stderr']}")
+        try:
+            size = int(src_check["stdout"].split()[-1]) * 1024
+            free = int(dst_check["stdout"].split()[0]) * 1024
+        except (ValueError, IndexError):
+            return self._result(started, exit_code=1, stderr="Could not measure the source size or the free space on the destination")
+        if "EXISTS" in dst_check["stdout"] and not overwrite:
+            return self._result(started, exit_code=1, stderr=(
+                f"{target} already exists on the destination and was left untouched. Move it aside first "
+                f"(e.g. mv {target} {target}.old-$(date +%F)) or set overwrite: true to merge into it."))
+        if size + COPY_MARGIN > free:
+            return self._result(started, exit_code=1, stderr=(
+                f"Not enough space on the destination: {human_size(size)} needed, {human_size(free)} free in {into}"))
+
+        # 2. stream it: tar | gzip on the source, gunzip | tar on the destination
+        res = await self.pipe(
+            src_id, as_root(f"tar -C {q(parent)} -cf - {q(name)} | gzip -1"),
+            dst_id, as_root(f"mkdir -p {q(into)} && gzip -dc | tar -C {q(into)} -xpf -"),
+            timeout=timeout, progress=progress)
+        if res["error"] or res["exit"] != 0:
+            res["stderr"] = f"Copy failed — the source is unchanged.\n{res['stderr']}".strip()
+            return res
+        note = res["stdout"].splitlines()[0]
+
+        # 3. after: compare both sides
+        if verify == "none":
+            return self._result(started, exit_code=0, stdout=f"copied {src_path} -> {target} ({note}); not verified")
+        digest = ("find {n} -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum | sha256sum | cut -d' ' -f1"
+                  if verify == "checksum" else "echo -")
+        script = (f"cd {{dir}} && {{{{ {digest}; find {{n}} -type f | wc -l; "
+                  "find {n} -type f -exec stat -c %s {{}} + | awk '{{s+=$1}} END {{print s+0}}'; }}")
+        a, b = await asyncio.gather(
+            self.run(src_id, as_root(script.format(dir=q(parent), n=q(name))), timeout=timeout),
+            self.run(dst_id, as_root(script.format(dir=q(into), n=q(name))), timeout=timeout))
+        if a["error"] or b["error"] or a["exit"] != 0 or b["exit"] != 0:
+            return self._result(started, exit_code=1, stdout=f"copied {src_path} -> {target} ({note})",
+                                stderr=f"Copied, but the check could not run: {a['error'] or a['stderr']} {b['error'] or b['stderr']}")
+        left, right = a["stdout"].split(), b["stdout"].split()
+        if len(left) != 3 or left != right:
+            return self._result(started, exit_code=1, stdout=f"copied {src_path} -> {target} ({note})",
+                                stderr=(f"VERIFY FAILED: the copy differs from the source (source: {' '.join(left)}; "
+                                        f"destination: {' '.join(right)}). Nothing was deleted. If the source was "
+                                        "being written to, stop that service and copy again."))
+        files, total = int(left[1]), int(left[2])
+        check = "SHA-256 of every file matches" if verify == "checksum" else "file count and sizes match"
+        return self._result(started, exit_code=0, stdout=(
+            f"copied {src_path} -> {target}: {files} files, {human_size(total)} ({note}); verified: {check}"))
 
     async def probe(self, server_id: int) -> dict[str, Any]:
         result = await self.run(server_id, PROBE, timeout=20, raw=True)

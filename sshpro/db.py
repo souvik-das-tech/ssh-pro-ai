@@ -85,6 +85,9 @@ class Database:
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_SCHEMA)
+        chat_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(chats)")}
+        if "favorite" not in chat_cols:  # favourite chats (never expire); added after 0.1
+            self.conn.execute("ALTER TABLE chats ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0")
         self.conn.commit()
 
     def close(self) -> None:
@@ -212,15 +215,37 @@ class Database:
         if row is None:
             return None
         events = self.conn.execute("SELECT event FROM chat_events WHERE chat_id = ? ORDER BY id", (chat_id,))
-        return {**dict(row), "events": [json.loads(r["event"]) for r in events]}
+        return {**dict(row), "favorite": bool(row["favorite"]), "events": [json.loads(r["event"]) for r in events]}
 
     def list_chats(self) -> list[dict[str, Any]]:
+        """Newest first, with the message count and the last request (its text, target label and the
+        servers it went to) so a chat can be asked again straight from the list."""
         rows = self.conn.execute(
             "SELECT c.*, (SELECT COUNT(*) FROM chat_events e WHERE e.chat_id = c.id"
-            " AND json_extract(e.event, '$.type') = 'chat.user') AS messages"
+            " AND json_extract(e.event, '$.type') = 'chat.user') AS messages,"
+            " (SELECT e.event FROM chat_events e WHERE e.chat_id = c.id"
+            " AND json_extract(e.event, '$.type') = 'chat.user' ORDER BY e.id DESC LIMIT 1) AS last"
             " FROM chats c ORDER BY updated_at DESC, id DESC"
         )
-        return [dict(r) for r in rows]
+        chats = []
+        for r in rows:
+            chat = dict(r)
+            last = json.loads(chat.pop("last") or "{}")
+            chat["favorite"] = bool(chat["favorite"])
+            chat["last"] = {k: last.get(k) for k in ("text", "mode", "target", "scope")} if last else None
+            chats.append(chat)
+        return chats
+
+    def update_chat(self, chat_id: int, favorite: bool | None = None, title: str | None = None) -> None:
+        if self.conn.execute("SELECT 1 FROM chats WHERE id = ?", (chat_id,)).fetchone() is None:
+            raise KeyError("chat not found")
+        if favorite is not None:
+            self.conn.execute("UPDATE chats SET favorite = ? WHERE id = ?", (int(favorite), chat_id))
+        if title is not None:
+            if not title.strip():
+                raise ValueError("the name cannot be empty")
+            self.conn.execute("UPDATE chats SET title = ? WHERE id = ?", (title.strip()[:120], chat_id))
+        self.conn.commit()
 
     def delete_chat(self, chat_id: int) -> None:
         self.conn.execute("DELETE FROM chat_events WHERE chat_id = ?", (chat_id,))
@@ -228,12 +253,13 @@ class Database:
         self.conn.commit()
 
     def purge_chats(self, days: int = 15) -> int:
-        """Delete chats with no activity for `days`. Returns how many were removed."""
+        """Delete chats with no activity for `days`, except favourites. Returns how many were removed."""
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
-        old = [r["id"] for r in self.conn.execute("SELECT id FROM chats WHERE updated_at < ?", (cutoff,))]
+        old = [r["id"] for r in self.conn.execute(
+            "SELECT id FROM chats WHERE updated_at < ? AND favorite = 0", (cutoff,))]
         for chat_id in old:
             self.conn.execute("DELETE FROM chat_events WHERE chat_id = ?", (chat_id,))
-        self.conn.execute("DELETE FROM chats WHERE updated_at < ?", (cutoff,))
+            self.conn.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
         self.conn.commit()
         return len(old)
 

@@ -7,6 +7,41 @@ All notable changes are listed here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Server-to-server transfers and migrations** (GeoServer, PostgreSQL/PostGIS, MySQL, Docker
+  volumes, app data). Two new AI step types:
+  - `copy` moves a file or folder from one server into a folder on another. The app relays the
+    data over its own SSH connections, so the servers need no SSH keys or network path to each
+    other, and nothing is stored on this PC. It checks free space first, never overwrites an
+    existing target unless asked to, keeps permissions, times and (with sudo) owners, and
+    afterwards compares both sides (SHA-256 of every file by default). Any difference fails the
+    step, and nothing is deleted.
+  - `pipe` streams one server's command output into a command on another, for example
+    `pg_dump -Fc` into `pg_restore` or `mysqldump` into `mysql`, with `pipefail` on both sides.
+    The sudo password is sent ahead of the data, and only when sudo needs one, so it never ends
+    up in the data.
+  - Steps in a round run in the order the AI lists them, and a failed step stops the rest of that
+    round. Both step types always need approval. The AI follows a no-data-loss procedure: inspect
+    both servers, never delete or overwrite, copy a consistent state, then verify (checksums, row
+    counts per table, service health) and report. Up to 10 rounds per request (was 6).
+  - New starter prompts: *Move GeoServer* and *Move a database*.
+- **Several chat windows at once**: open up to 6 AI chat windows as tabs (`+ New window`,
+  `Alt+N`, `Alt+1…9` to switch, middle-click to close). Each window has its own AI session,
+  conversation, targets and mode, so one window can upgrade the web servers while another checks
+  the databases. Windows in the background keep updating; their tabs show a spinner while they
+  work, an amber dot when a change waits for approval, and a green dot for new results. Windows,
+  their chats and targets come back after a reload or restart. In History a chat can be opened in
+  a new window, and a chat that is already open switches to its window.
+- **Favorite chats**: star a chat in History, in the new **★ Favorites** menu, or for the open
+  chat. Favorites are never deleted by the 15-day cleanup, are listed first in History, and can be
+  renamed. In Favorites, **Ask again** opens a chat with its last request already in the box, so a
+  follow-up like a status check needs no long prompt. History also has a search box.
+- **Chats remember their servers**: every message stores the target that was picked (a folder, one
+  server, all, or hand-picked servers). Opening a chat from History or Favorites selects those
+  servers again and says which ones; servers deleted since then are skipped.
+- **Custom targets**: the `Custom` chip opens a picker to choose any servers from any folders,
+  with whole-folder checkboxes, a filter, All / None / Online / Invert, and saved selections.
+  `Ctrl`+click on folder chips adds or removes whole folders. The chat history shows a short label
+  such as `Custom (5): web, db-main`.
 - **ChatGPT as an AI brain** through the OpenAI Codex CLI, signed in with a ChatGPT account (no
   API key). The bundled `codex.exe` of the ChatGPT/Codex desktop app or the VS Code extension is
   found on its own. ChatGPT models appear in the model dropdown next to the AGY models
