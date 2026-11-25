@@ -23,7 +23,10 @@
         <div class="brand-name">SSH Pro <span class="grad">AI</span></div>
         <div class="brand-sub" id="brandSub">fleet control · AI brain</div>
       </div>
-      <button class="btn btn-ghost btn-icon btn-sm theme-btn" id="btnTheme" title="Switch to dark mode"><span class="i" data-icon="moon"></span></button>
+      <div class="brand-tools">
+        <button class="btn btn-ghost btn-icon btn-sm theme-btn" id="btnTheme" title="Switch to dark mode"><span class="i" data-icon="moon"></span></button>
+        <button class="btn btn-ghost btn-icon btn-sm side-btn" id="btnSide" title="Collapse the sidebar (Ctrl+B)"><span class="i" data-icon="sidebar"></span></button>
+      </div>
     </div>
 
     <div class="search">
@@ -48,7 +51,7 @@
       <div class="side-foot-row">
         <button class="btn btn-ghost btn-sm" id="btnImport" title="Import from Termix ssh.sqlite"><span class="i" data-icon="import"></span>Import</button>
         <button class="btn btn-ghost btn-sm" id="btnBackup" title="Export or restore a backup"><span class="i" data-icon="shield"></span>Backup</button>
-        <button class="btn btn-ghost btn-sm" id="btnAudit"><span class="i" data-icon="history"></span>Audit log</button>
+        <button class="btn btn-ghost btn-sm" id="btnAudit" title="Audit log: every command that ran"><span class="i" data-icon="history"></span>Audit log</button>
       </div>
     </div>
   </aside>
@@ -91,9 +94,16 @@
           <button data-mode="direct"><span class="i" data-icon="terminal"></span>Direct</button>
         </div>
         <div class="target">
-          <span class="target-label">Target</span>
-          <div class="chips tchips" id="targetChips"></div>
-          <select id="targetSel" title="Target one server"></select>
+          <button class="tsel-btn" id="targetBtn" title="Which servers the AI or the command goes to" aria-haspopup="true">
+            <span class="tsel-k">Target</span><span class="tsel-ico" id="targetBtnIco"></span><span class="tsel-label" id="targetBtnLabel">All servers</span><b id="targetBtnN"></b><span class="i tsel-chev" data-icon="chevdown"></span>
+          </button>
+          <div class="tmenu" id="targetMenu" hidden>
+            <div class="tmenu-list" id="targetChips"></div>
+            <div class="tmenu-sec">One server</div>
+            <label class="search tmenu-search"><span class="i" data-icon="search"></span><input id="tmenuQ" placeholder="Find a server…" autocomplete="off" spellcheck="false"></label>
+            <div class="tmenu-servers" id="tmenuServers"></div>
+            <div class="tmenu-hint">Ctrl+click folders to combine them</div>
+          </div>
           <span class="target-info" id="targetInfo"></span>
           <div class="tpick" id="tpick" hidden>
             <div class="tpick-top">

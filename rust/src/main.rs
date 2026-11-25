@@ -312,7 +312,10 @@ mod win {
     /// None if another instance runs (it was asked to come to the front).
     pub fn single_instance() -> Option<ShowSignal> {
         let user = std::env::var("USERNAME").unwrap_or_default();
-        let name = wide(&format!("Local\\SSHProAI-Rust-{user}"));
+        // one window per data folder: a copy run on its own SSHPRO_DATA_DIR (tests) is separate
+        let folder = crate::paths::data_dir().to_string_lossy().to_lowercase();
+        let tag = folder.bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
+        let name = wide(&format!("Local\\SSHProAI-Rust-{user}-{tag:x}"));
         let event = unsafe { CreateEventW(std::ptr::null(), 0, 0, name.as_ptr()) };
         if event.is_null() {
             return Some(ShowSignal(event)); // cannot tell: just run

@@ -47,6 +47,8 @@ const ICONS = {
   sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
   minus: '<path d="M5 12h14"/>',
   star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/>',
+  chevdown: '<path d="m6 9 6 6 6-6"/>',
+  sidebar: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 10l-2 2 2 2"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
   reconnect: '<path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/>',
@@ -357,14 +359,21 @@ function renderTargets() {
   const chips = [['all', 'All servers', all.length, icon('layers')], ...folders().map((f) => [`folder:${f}`, f, count(f), icon('folder')])];
   if (S.selected.size) chips.push(['selected', 'Selected', S.selected.size, icon('check')]);
   const tip = (label, n) => `${label}: ${n} servers · Ctrl+click to add/remove it in a custom selection`;
+  const check = (on) => `<span class="tm-check">${on ? svg('check') : ''}</span>`;
+  // one compact button; the folders, Custom and single servers live in its menu
   $('#targetChips').innerHTML = chips.map(([value, label, n, ic]) =>
-    `<button class="chip ${S.target === value ? 'on' : ''}" data-target="${esc(value)}" title="${esc(tip(label, n))}">${ic}${esc(label)} <b>${n}</b></button>`).join('')
-    + `<button class="chip chip-custom ${S.target === 'custom' ? 'on' : ''}" data-target="custom" title="Pick any servers from any folders">${icon('sliders')}Custom <b>${S.custom.size}</b></button>`;
-  const sel = $('#targetSel');
-  sel.innerHTML = `<option value="">One server…</option>` + all.map((s) => `<option value="server:${s.id}">${esc(s.name)}</option>`).join('');
-  sel.value = S.target.startsWith('server:') ? S.target : '';
-  sel.classList.toggle('on', !!sel.value);
+    `<button class="tm-item ${S.target === value ? 'on' : ''}" data-target="${esc(value)}" title="${esc(tip(label, n))}">${check(S.target === value)}${ic}<span class="tm-name">${esc(label)}</span><b>${n}</b></button>`).join('')
+    + `<button class="tm-item chip-custom ${S.target === 'custom' ? 'on' : ''}" data-target="custom" title="Pick any servers from any folders">${check(S.target === 'custom')}${icon('sliders')}<span class="tm-name">Custom…</span><b>${S.custom.size}</b></button>`;
   const ids = targetIds();
+  const [ico, label] = S.target === 'all' ? ['layers', 'All servers']
+    : S.target.startsWith('folder:') ? ['folder', S.target.slice(7)]
+    : S.target.startsWith('server:') ? ['server', S.servers.get(+S.target.slice(7))?.name || 'Server']
+    : S.target === 'selected' ? ['check', 'Selected'] : ['sliders', 'Custom'];
+  $('#targetBtnIco').innerHTML = icon(ico);
+  $('#targetBtnLabel').textContent = label;
+  $('#targetBtnN').textContent = ids.length;
+  $('#targetBtn').classList.toggle('narrow', S.target !== 'all');
+  if (!$('#targetMenu').hidden) renderTargetServers();
   $('#targetInfo').textContent = `${online(ids)}/${ids.length} online`;
   updateComposerHint();
   renderWinTabs();
@@ -375,15 +384,43 @@ function setTarget(value) {
   saveWins();
   renderTargets();
 }
-$('#targetChips').addEventListener('click', (e) => {
+function renderTargetServers() {
+  const q = $('#tmenuQ').value.trim().toLowerCase();
+  const list = serverList().filter((s) => !q || [s.name, s.host, folderName(s)].some((v) => String(v || '').toLowerCase().includes(q)));
+  $('#tmenuServers').innerHTML = list.map((s) => {
+    const value = `server:${s.id}`;
+    return `<button class="tm-item tm-srv ${S.target === value ? 'on' : ''}" data-target="${value}" title="${esc(s.username)}@${esc(s.host)}"><span class="dot ${status(s)}"></span><span class="tm-name">${esc(s.name)}</span><span class="tm-folder">${esc(folderName(s))}</span></button>`;
+  }).join('') || '<div class="tm-empty">No server matches</div>';
+}
+function toggleTargetMenu(open = $('#targetMenu').hidden) {
+  $('#targetMenu').hidden = !open;
+  $('#targetBtn').classList.toggle('open', open);
+  if (!open) return;
+  togglePicker(false);
+  $('#tmenuQ').value = '';
+  renderTargetServers();
+  setTimeout(() => $('#tmenuQ').focus(), 0);
+}
+$('#targetBtn').onclick = () => toggleTargetMenu();
+$('#tmenuQ').addEventListener('input', renderTargetServers);
+$('#tmenuQ').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { const first = $('#tmenuServers [data-target]'); if (first) first.click(); }
+  if (e.key === 'Escape') { e.stopPropagation(); toggleTargetMenu(false); $('#targetBtn').focus(); }
+});
+document.addEventListener('mousedown', (e) => {
+  if (!$('#targetMenu').hidden && !e.target.closest('#targetMenu') && !e.target.closest('#targetBtn')) toggleTargetMenu(false);
+});
+$('#targetMenu').addEventListener('click', (e) => {
   const c = e.target.closest('[data-target]');
   if (!c) return;
   const value = c.dataset.target;
   if (value === 'custom') {
     if (S.target !== 'custom' && !S.custom.size) setCustom(targetIds()); // start from what was targeted
+    toggleTargetMenu(false);
     setTarget('custom');
-    return togglePicker();
+    return togglePicker(true);
   }
+  if (!(e.ctrlKey || e.metaKey || e.shiftKey)) toggleTargetMenu(false); // Ctrl+click keeps it open to combine
   if (e.ctrlKey || e.metaKey || e.shiftKey) { // combine folders: Ctrl+click adds / removes a whole folder
     const base = new Set(S.target === 'custom' ? S.custom : targetIds());
     const ids = idsFor(value, S.custom);
@@ -394,7 +431,6 @@ $('#targetChips').addEventListener('click', (e) => {
   }
   setTarget(value);
 });
-$('#targetSel').onchange = (e) => setTarget(e.target.value);
 
 /* ---- custom target picker: any servers from any folders ---- */
 function setCustom(ids) {
@@ -1434,6 +1470,20 @@ function applyTheme(theme, save = true) {
   S.terms.forEach((t) => { t.term.options.theme = termTheme(); });
   if (save) api('/api/ui', { theme }).catch(() => {}); // the app window's title bar follows
 }
+function setSidebar(collapsed, save = true) {
+  $('.app').classList.toggle('side-collapsed', collapsed);
+  const b = $('#btnSide');
+  b.title = collapsed ? 'Expand the sidebar (Ctrl+B)' : 'Collapse the sidebar (Ctrl+B)';
+  if (save) store.set('sideCollapsed', collapsed);
+  setTimeout(fitVisible, 230); // terminals take the freed width once the slide has finished
+}
+$('#btnSide').onclick = () => setSidebar(!$('.app').classList.contains('side-collapsed'));
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b' && !e.target.closest('.xterm')) {
+    e.preventDefault();
+    $('#btnSide').click();
+  }
+});
 $('#btnTheme').onclick = () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
 
 function openTerminal(serverId, focus = true) {
@@ -1874,6 +1924,7 @@ async function restoreWins() {
 
 async function boot() {
   applyTheme(document.documentElement.dataset.theme, false); // the button shows the other mode
+  setSidebar(store.get('sideCollapsed', false), false);
   hydrateIcons();
   for (const saved of store.get('wins', [])) if (saved?.id && S.wins.size < MAX_WINS) makeWin(saved);
   if (!S.wins.size) makeWin({ id: 'main' });
