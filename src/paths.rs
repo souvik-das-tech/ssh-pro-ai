@@ -1,5 +1,5 @@
 //! Filesystem locations. Runtime data (db, logs, settings) lives in %LOCALAPPDATA%\SSH-Pro-AI, the
-//! same folder the Python app uses, so both read the same servers and chat history.
+//! same folder the earlier Python version used, so existing servers and chats are kept.
 
 use std::path::PathBuf;
 
@@ -38,7 +38,7 @@ pub fn home_dir() -> PathBuf {
 }
 
 /// A Termix `ssh.sqlite` export next to the app (the exe's folder, or the repo root above
-/// `rust/target/...` during development) is imported on the first start.
+/// `target/...` during development) is imported on the first start.
 pub fn termix_db() -> PathBuf {
     if let Some(path) = std::env::var_os("SSHPRO_TERMIX_DB") {
         return PathBuf::from(path);

@@ -14,7 +14,6 @@ labels: bug
 
 **Environment**
 - Windows version:
-- Python version:
 - SSH Pro AI version / commit:
 - AGY CLI version (if the AI is involved):
 - Server OS (e.g. Ubuntu 24.04):

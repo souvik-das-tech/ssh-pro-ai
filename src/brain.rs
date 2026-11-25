@@ -66,7 +66,7 @@ fn next_id() -> i64 {
     IDS.fetch_add(1, Ordering::SeqCst)
 }
 
-/// Errors of the AI loop and the chat API; each maps to the Python exception class it replaces.
+/// Errors of the AI loop and the chat API; `kind()` names them in error messages.
 #[derive(Debug, Clone)]
 pub enum BrainError {
     Ai(AiError),

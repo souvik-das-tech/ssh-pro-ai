@@ -4,7 +4,7 @@
 //! password and key elsewhere. A backup instead holds the servers with their secrets in PLAIN form
 //! (JSON) — treat the file like the keys themselves. Restoring re-encrypts the secrets with DPAPI and
 //! skips servers already present (same host + port + user), so it never overwrites or removes anything.
-//! The file format is the same as the Python app's, so backups move between both.
+//! The file format is the same as the earlier Python version's, so its backups restore here.
 
 use anyhow::{bail, Result};
 use serde_json::{json, Map, Value};

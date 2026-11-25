@@ -1,14 +1,14 @@
 use std::path::{Path, PathBuf};
 
 fn main() {
-    println!("cargo:rerun-if-changed=../sshpro.ico");
-    println!("cargo:rerun-if-changed=../sshpro/web");
+    println!("cargo:rerun-if-changed=sshpro.ico");
+    println!("cargo:rerun-if-changed=web");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
     // The exe icon (resource 1) is also the window and taskbar icon.
     let mut res = winresource::WindowsResource::new();
-    res.set_icon_with_id("../sshpro.ico", "1");
+    res.set_icon_with_id("sshpro.ico", "1");
     res.set("ProductName", "SSH Pro AI");
     res.set("FileDescription", "SSH Pro AI");
     if let Err(e) = res.compile() {

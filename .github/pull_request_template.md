@@ -3,7 +3,7 @@
 ## How it was tested
 
 ## Checklist
-- [ ] `python -m pytest` passes
+- [ ] `cargo test` passes
 - [ ] Tests added for new behaviour
 - [ ] `CHANGELOG.md` updated (user-facing changes)
 - [ ] No secrets, real hostnames or IPs in code, tests or screenshots

@@ -1,5 +1,5 @@
 //! Local SQLite store: servers (secrets DPAPI-encrypted), the audit log and chat history.
-//! Same schema and file as the Python app.
+//! Same schema and file as the earlier Python version, so existing data opens as it is.
 
 use std::path::Path;
 use std::sync::Mutex;

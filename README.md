@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="sshpro/web/icon.png" width="96" alt="SSH Pro AI icon">
+<img src="web/icon.png" width="96" alt="SSH Pro AI icon">
 
 # SSH Pro AI
 
@@ -9,7 +9,7 @@ and an AI ops assistant that plans the work while *you* stay in control.**
 
 [![Tests](https://github.com/souvik-das-tech/ssh-pro-ai/actions/workflows/tests.yml/badge.svg)](https://github.com/souvik-das-tech/ssh-pro-ai/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)
+![Built with Rust](https://img.shields.io/badge/built%20with-Rust-B7410E.svg)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6.svg)
 
 </div>
@@ -37,36 +37,36 @@ window and lets an AI do the repetitive part without ever handing it the keys.
 - ⚡ **Parallel commands**: run one command on a whole folder or the whole fleet at once
   (**Direct** mode, no AI needed).
 - 🤖 **AI ops chat**: plain-language requests in English, Banglish or Hinglish, answered with a
-  per-server table. With AGY the AI can also search the web for CVEs, release notes and latest versions.
-- 🧠 **Pick your brain**: Gemini, Claude and GPT-OSS through the AGY CLI, or **ChatGPT** through the
-  Codex CLI with your ChatGPT account. Switch any time, or let **⚡ Auto** pick a fast model for
-  quick checks and a smart one for troubleshooting, security and changes.
+  per-server table. The AI can also search the web for CVEs, release notes and latest versions.
+- 🧠 **Pick your model**: Gemini, Claude and GPT-OSS through the AGY CLI. Switch any time, or let
+  **⚡ Auto** pick a fast model for quick checks and a smart one for troubleshooting, security
+  and changes.
 - 🛡️ **Safe by design**: an allowlist decides what counts as read-only. Everything else waits for
   your approval and rolls out **canary-first** (one server, then the rest).
 - 🔐 **Secrets never leave your PC**: SSH keys and passwords are encrypted with Windows DPAPI.
   The AI only sees server names, folders, tags, user and OS: **never IPs, passwords or keys**.
   Keys, passwords and tokens that show up in command output are masked before the AI sees them.
+- 🔁 **Server to server**: copy data or stream a database dump from one server into another,
+  checked on both sides, with nothing stored on your PC.
 - 📦 **Uploads and downloads**: send a file or folder from your PC to many servers (folders travel
   as one archive), or pull backups down into Downloads.
 - 🧾 **Audit log**: every prompt, command, server and result is recorded.
 - 💾 **Backup and restore**: move your whole server list to another PC in one file.
-- 📥 **Termix import**: bring over existing connections from a Termix `ssh.sqlite` export.
+- 🌗 **Light and dark mode**, and a sidebar that folds into a slim rail.
+- 🪶 **Small and native**: one ~13 MB Rust app; the installer is about 6 MB.
 
-## Quick start
+## Install
 
-**Requirements:** Windows 10/11 and [Python 3.12+](https://www.python.org/downloads/).
+Download **`SSH-Pro-AI-Setup-<version>.exe`** and run it. It installs for your Windows user (no
+admin rights needed), adds Start menu and desktop shortcuts, and can be removed from
+**Settings > Apps**. If the PC lacks the Microsoft Edge WebView2 Runtime (it ships with
+Windows 11), the setup installs it. Installing a newer setup updates the app in place.
 
-```bat
-git clone https://github.com/souvik-das-tech/ssh-pro-ai.git
-cd ssh-pro-ai
-setup.cmd
-```
+The setup is not code-signed yet, so the first time Windows SmartScreen may show "Windows
+protected your PC": choose **More info > Run anyway**.
 
-`setup.cmd` creates a virtual environment, installs the dependencies and puts an
-**SSH Pro AI** icon on your desktop. Double-click the icon (or run `run.cmd`) and add your first
-server with **Add server**.
-
-SSH, terminals and Direct mode work right away. Only the AI chat needs an AI brain: the AGY CLI and/or ChatGPT (next sections).
+Open **SSH Pro AI** and add your first server with **Add server**. SSH, terminals and Direct mode
+work right away; only the AI chat needs the AGY CLI.
 
 ### Enable the AI chat (AGY CLI)
 
@@ -82,21 +82,13 @@ winget install Google.AntigravityCLI
 Then run `agy` once in a terminal, sign in, and restart SSH Pro AI.
 Guide: <https://docs.flutter.dev/ai/antigravity-cli>
 
-### Use ChatGPT as the brain (Codex CLI)
-
-ChatGPT works too, through the **OpenAI Codex CLI** signed in with your ChatGPT account (no API
-key). If the ChatGPT/Codex desktop app or the VS Code ChatGPT extension is installed, its bundled
-`codex.exe` is found automatically. Otherwise install the CLI (`npm i -g @openai/codex`), then run
-`codex login` once and restart SSH Pro AI. Guide: <https://developers.openai.com/codex/cli>
-
-Codex only plans, exactly like AGY: its shell, sub-agent, plugin and browser tools are disabled
-and its sandbox is read-only, so the app stays the only thing that runs commands.
+AGY only plans: in headless mode its own tools are auto-denied, so the app stays the only thing
+that runs commands.
 
 ### Pick a model
 
 Pick a model from the dropdown in the chat toolbar and switch whenever you like (a switch starts a
-new chat). It lists AGY models (`agy models`) and ChatGPT models (`ChatGPT · …`, from the Codex
-catalog) side by side, live, so new models show up without an app update.
+new chat). The list comes live from `agy models`, so new models show up without an app update.
 
 **⚡ Auto** picks the model per request, locally and instantly (no extra AI call). Quick checks
 and chat ("disk space koto?", "node version") go to the **Fast** model. Troubleshooting ("502
@@ -113,7 +105,7 @@ chat so far. The status line shows which model is working and why.
         │
         ▼
  ┌──────────────┐  server list (names, folders, tags, OS; no IPs, no secrets)
- │ AGY / Codex  │◄──────────────────────────────────────────────┐
+ │   AGY CLI    │◄──────────────────────────────────────────────┐
  │  (planner)   │   outputs with secrets masked                 │
  └──────┬───────┘                                               │
         │ JSON plan: steps, risk, rollout                       │
@@ -129,19 +121,15 @@ chat so far. The status line shows which model is working and why.
                                  answer + per-server table
 ```
 
-1. Your message and a **redacted** server list go to the AI CLI of the chosen model (AGY, or
-   Codex for ChatGPT).
+1. Your message and a **redacted** server list go to the AGY CLI.
 2. The AI replies with a JSON plan: which servers, which commands, how risky.
 3. SSH Pro AI checks every command against its own **read-only allowlist**. It never trusts the
    AI's own risk label on its own.
 4. Read-only steps run immediately in parallel. Anything else (install, restart, delete, upload,
-   local commands) is shown to you first and needs **Approve**.
-5. Results go back to the AI for analysis (up to 6 rounds), and you get a summary and a table.
+   local commands, server-to-server copies) is shown to you first and needs **Approve**.
+5. Results go back to the AI for analysis (up to 10 rounds), and you get a summary and a table.
    Servers with the same output are grouped and long output is cut to its start and end, so a
    big fleet costs few tokens.
-
-The AI (AGY or ChatGPT) never executes anything itself. The app runs every command, and the AI's
-own tools stay disabled.
 
 **Nothing changes without your OK.** A step runs at once only if the app's own allowlist says it
 just reads, whatever risk the AI claims. Tools that look harmless but can write or run things
@@ -162,9 +150,6 @@ The AI can also plan steps on the Windows PC running the app:
   Existing files are never overwritten: a copy becomes `name (2).sql.gz`. For root-owned files the
   AI first copies them to `/tmp` with `sudo`, then cleans up.
 
-Example: *"upload the backup from my Downloads to the db server, import it, then clean up"* or
-*"download yesterday's DB backup from the db server"*.
-
 Read-only local checks (`Get-ChildItem`, `git status`, `node -v`) run at once. Every other local
 command, upload and download needs your approval.
 
@@ -174,10 +159,11 @@ command, upload and download needs your approval.
 |---|---|
 | Servers, audit log (kept 5 days), chat history | `%LOCALAPPDATA%\SSH-Pro-AI\sshpro.sqlite3` |
 | Logs | `%LOCALAPPDATA%\SSH-Pro-AI\logs\` |
-| Chosen AI model | `%LOCALAPPDATA%\SSH-Pro-AI\settings.json` |
+| Chosen AI model, Auto models, light/dark | `%LOCALAPPDATA%\SSH-Pro-AI\settings.json` |
 
 Passwords, private keys, key passphrases and sudo passwords are encrypted with **Windows DPAPI**,
-so they can only be decrypted by your Windows user on this PC.
+so they can only be decrypted by your Windows user on this PC. Uninstalling the app keeps this
+folder. Data from the earlier Python version of SSH Pro AI opens as it is.
 
 ### Backup and restore
 
@@ -189,8 +175,8 @@ overwritten or deleted.
 
 ### Import from Termix
 
-Put a Termix export named `ssh.sqlite` in the project folder and it is imported on first start,
-or use **Load from file…**. That file contains plain-text secrets and is git-ignored.
+Put a Termix export named `ssh.sqlite` next to `sshpro.exe` and it is imported on first start,
+or use **Import** in the sidebar. That file contains plain-text secrets and is git-ignored.
 
 ## Configuration
 
@@ -198,33 +184,37 @@ or use **Load from file…**. That file contains plain-text secrets and is git-i
 |---|---|
 | `SSHPRO_AGY` | Path to `agy.exe` if it is installed somewhere non-standard |
 | `SSHPRO_AGY_MODEL` | Default AI model (the dropdown choice overrides it) |
-| `SSHPRO_CODEX` | Path to `codex.exe` if it is installed somewhere non-standard |
-| `SSHPRO_CODEX_EFFORT` | Reasoning effort for ChatGPT models (default `low`; `medium`/`high` are slower) |
 | `SSHPRO_DATA_DIR` | Use a different data folder (handy for testing) |
+| `SSHPRO_LOG` | Log detail, e.g. `debug` (default `info`) |
 
-## Development
+## Build from source
 
-```bat
-setup.cmd
-.venv\Scripts\python -m pip install -r requirements-dev.txt
-.venv\Scripts\python -m pytest
-```
-
-Run only the backend and open the printed URL in a browser:
+Requirements: Windows 10/11, [Rust](https://rustup.rs) and a MinGW gcc for the C parts (ring,
+SQLite). Building the installer also needs Inno Setup 6.
 
 ```bat
-.venv\Scripts\python -m sshpro --serve
+winget install BrechtSanders.WinLibs.POSIX.UCRT
+winget install JRSoftware.InnoSetup
+git clone https://github.com/souvik-das-tech/ssh-pro-ai.git
+cd ssh-pro-ai
+build.cmd        :: -> target\release\sshpro.exe (+ WebView2Loader.dll, keep them together)
+installer.cmd    :: -> target\installer\SSH-Pro-AI-Setup-<version>.exe
 ```
 
-The tests include a fake SSH server and fake AI providers, so no real servers, AGY or ChatGPT account are
-needed. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a tour of the code.
+`cargo test` runs the test suite: the command safety classifier, secret masking, the database,
+backups, the Termix import, folder transfers, the HTTP token guard, and the AI job loop with a
+scripted AI, so no real servers or AGY account are needed.
+
+`target\release\sshpro.exe --serve` starts only the backend and prints a URL to open in a
+browser, which is handy when working on the UI (`web/`). See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a tour of the code.
 
 ## Roadmap
 
 - [ ] SFTP file manager in the UI
 - [ ] SSH port tunnels
 - [ ] Scheduled health checks (daily disk/RAM/updates report)
-- [ ] Packaged installer (no Python needed)
+- [ ] Code-signed installer
 - [ ] macOS / Linux support (replace DPAPI with the OS keychain)
 
 Ideas and votes welcome in [Issues](https://github.com/souvik-das-tech/ssh-pro-ai/issues).

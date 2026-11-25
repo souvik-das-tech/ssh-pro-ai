@@ -1,5 +1,5 @@
 @echo off
-rem Build the Rust desktop app: rust\target\release\sshpro.exe (+ WebView2Loader.dll next to it).
+rem Build the Rust desktop app: target\release\sshpro.exe (+ WebView2Loader.dll next to it).
 rem Needs Rust (rustup, GNU toolchain) and a MinGW gcc for the C parts (ring, SQLite), e.g.
 rem   winget install BrechtSanders.WinLibs.POSIX.UCRT
 setlocal

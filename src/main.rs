@@ -1,7 +1,7 @@
 //! Entry point: `sshpro.exe` (desktop window) or `sshpro.exe --serve` (backend only, prints the URL
 //! to open in a browser; for development).
 //!
-//! The window is a native WebView2 view (wry + tao) showing the same web UI as the Python app,
+//! The window is a native WebView2 view (wry + tao) showing the web UI in web/,
 //! served by the Rust backend on 127.0.0.1 with a per-launch token.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]

@@ -1,5 +1,5 @@
 ; Windows installer for the Rust build of SSH Pro AI (Inno Setup 6).
-; Build it with rust\installer.cmd, which passes AppVersion from Cargo.toml.
+; Build it with installer.cmd, which passes AppVersion from Cargo.toml.
 ;
 ; Installs per user by default (no admin needed) into %LOCALAPPDATA%\Programs\SSH Pro AI, adds
 ; Start menu and desktop shortcuts and an entry in Settings > Apps. Uninstalling removes the app
@@ -28,7 +28,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir=..\target\installer
 OutputBaseFilename=SSH-Pro-AI-Setup-{#AppVersion}
-SetupIconFile=..\..\sshpro.ico
+SetupIconFile=..\sshpro.ico
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 WizardStyle=modern

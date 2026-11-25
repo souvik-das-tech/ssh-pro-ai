@@ -1,14 +1,5 @@
-# Python
-.venv/
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.pytest-data/
-
 # Build output
-build/
-dist/
-*.egg-info/
+target/
 
 # Logs
 *.log
@@ -27,5 +18,3 @@ data/
 .DS_Store
 Thumbs.db
 
-# Rust build output
-rust/target/

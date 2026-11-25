@@ -1,8 +1,8 @@
 //! Local backend for the UI: REST + WebSockets on 127.0.0.1 with a random per-launch token.
 //!
 //! The token keeps other local programs and web pages from driving the API (it can run commands
-//! on every server), so every /api and /ws request must carry it. The routes and event shapes are
-//! the same as the Python backend's, so the web UI in sshpro/web runs unchanged.
+//! on every server), so every /api and /ws request must carry it. The web UI (web/) is embedded
+//! in the exe and served from memory.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -37,7 +37,7 @@ pub const AUDIT_DAYS: i64 = 5;
 pub const CHAT_DAYS: i64 = 15;
 
 #[derive(RustEmbed)]
-#[folder = "../sshpro/web/"]
+#[folder = "web/"]
 struct Web;
 
 pub struct Backend {
@@ -56,7 +56,7 @@ pub fn ui_theme() -> &'static str {
     if load_settings().get("theme").and_then(Value::as_str) == Some("dark") { "dark" } else { "light" }
 }
 
-/// `{"error": ...}` with status 400 (403 for a bad token), like the Python backend.
+/// `{"error": ...}` with status 400 (403 for a bad token); the UI shows the message.
 #[derive(Debug)]
 pub struct ApiError(StatusCode, String);
 

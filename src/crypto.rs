@@ -1,6 +1,6 @@
 //! Secrets at rest are encrypted with Windows DPAPI (bound to the current Windows user), so the
 //! database file is useless if copied to another account or machine. No master password needed.
-//! Same format as the Python app ("dpapi:" + base64), so both can read each other's secrets.
+//! Same format as the earlier Python version ("dpapi:" + base64), so its saved secrets still open.
 
 use base64::Engine;
 

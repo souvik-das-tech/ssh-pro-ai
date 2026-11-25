@@ -1,5 +1,5 @@
 @echo off
-rem Build the Windows installer: rust\target\installer\SSH-Pro-AI-Setup-<version>.exe
+rem Build the Windows installer: target\installer\SSH-Pro-AI-Setup-<version>.exe
 rem Needs everything build.cmd needs, plus Inno Setup 6:  winget install JRSoftware.InnoSetup
 setlocal
 cd /d "%~dp0"

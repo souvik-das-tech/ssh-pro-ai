@@ -6,7 +6,39 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Rewritten in Rust.** SSH Pro AI is now one native `sshpro.exe` (WebView2 window, axum
+  backend, russh, SQLite) with the same features and UI. No Python, virtual environment or Qt to
+  install. It opens the data of the earlier Python version as it is: servers, DPAPI secrets,
+  saved host keys, chats, settings and `.sshpro` backups.
+- **Windows installer**: `SSH-Pro-AI-Setup-<version>.exe` (~6 MB) installs per user without admin
+  rights, adds Start menu and desktop shortcuts and an uninstall entry, installs the WebView2
+  Runtime when it is missing, and updates the app in place. Uninstalling keeps your data.
+- **AGY is the only AI brain.** The ChatGPT (Codex CLI) brain was removed; a ChatGPT model saved
+  in the settings is ignored and an AGY model is used instead.
+- **Compact target picker**: the folder chips and the "One server" list became one Target button
+  whose menu lists all servers, each folder, Custom and a searchable list of servers, so the AI
+  toolbar fits on one line.
+- The window opens inside the screen (without the taskbar) and centred; it used to be taller than
+  a 1080p screen at 125 % scaling, hiding the prompt box.
+- When a cut connection stops a running command, the command is reported as cut off instead of
+  being run again.
+
 ### Added
+- **Light and dark mode**: light by default; the sun / moon button next to the logo switches it.
+  The choice is remembered and the window title bar follows it. Terminals get a light palette.
+- **Collapsible sidebar**: the button next to the logo (or Ctrl+B) folds the sidebar into a slim
+  rail with a status dot per server (name on hover) and the footer tools as icons.
+
+### Fixed
+- The prompt box is one tidy line when empty and resizes for drafts and suggestions, without a
+  stray scrollbar.
+- Long folder names in the sidebar stay on one line.
+
+### Removed
+- The Python app (`sshpro/` package, `setup.cmd`, `run.cmd`, `requirements*.txt`, Python tests).
+
+### Added (earlier, in the Python version)
 - **Server-to-server transfers and migrations** (GeoServer, PostgreSQL/PostGIS, MySQL, Docker
   volumes, app data). Two new AI step types:
   - `copy` moves a file or folder from one server into a folder on another. The app relays the

@@ -1,6 +1,6 @@
 # Third-party notices
 
-SSH Pro AI bundles the following files in `sshpro/web/vendor/`:
+SSH Pro AI bundles the following files in `web/vendor/`:
 
 | Component | Files | License |
 |---|---|---|
@@ -8,8 +8,13 @@ SSH Pro AI bundles the following files in `sshpro/web/vendor/`:
 | [@xterm/addon-fit](https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit) | `addon-fit.js` | MIT, The xterm.js authors |
 | [@xterm/addon-web-links](https://github.com/xtermjs/xterm.js/tree/master/addons/addon-web-links) | `addon-web-links.js` | MIT, The xterm.js authors |
 
-Python dependencies are installed from PyPI by `setup.cmd` and keep their own licenses:
-[asyncssh](https://github.com/ronf/asyncssh) (EPL-2.0 or GPL-2.0-or-later),
-[aiohttp](https://github.com/aio-libs/aiohttp) (Apache-2.0),
-[pywin32](https://github.com/mhammond/pywin32) (PSF),
-[PySide6](https://doc.qt.io/qtforpython-6/) (LGPL-3.0).
+The app is built from Rust crates listed in `Cargo.toml` / `Cargo.lock`, each under its own
+license (mostly MIT and/or Apache-2.0), among them
+[russh](https://github.com/Eugeny/russh) and russh-sftp (Apache-2.0),
+[tokio](https://github.com/tokio-rs/tokio) and [axum](https://github.com/tokio-rs/axum) (MIT),
+[wry](https://github.com/tauri-apps/wry) and [tao](https://github.com/tauri-apps/tao) (MIT or Apache-2.0),
+[rusqlite](https://github.com/rusqlite/rusqlite) (MIT, with SQLite in the public domain) and
+[ring](https://github.com/briansmith/ring) (ISC-style). `cargo tree` lists them all.
+
+The installer ships Microsoft's `WebView2Loader.dll` (from the WebView2 SDK, redistributable
+under its license) and may download the Microsoft Edge WebView2 Runtime from Microsoft.

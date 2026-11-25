@@ -1228,7 +1228,7 @@ impl SshManager {
     }
 }
 
-/// Host key algorithms to offer, one list per connection attempt: RSA first (what the Python app
+/// Host key algorithms to offer, one list per connection attempt: RSA first (what the earlier Python version
 /// negotiated, so its saved fingerprints match and new ones stay readable by both), then each
 /// other key type on its own for servers whose saved key is of that type.
 fn host_key_orders() -> Vec<Vec<russh::keys::Algorithm>> {
