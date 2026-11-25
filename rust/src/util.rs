@@ -188,7 +188,7 @@ pub fn command(program: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command 
     cmd
 }
 
-/// Kill a process and all its children (agy.exe and codex.exe may spawn helpers).
+/// Kill a process and all its children (agy.exe may spawn helpers).
 pub fn kill_tree(pid: u32) {
     #[cfg(windows)]
     {

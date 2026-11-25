@@ -47,6 +47,8 @@ const ICONS = {
   sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
   minus: '<path d="M5 12h14"/>',
   star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
   reconnect: '<path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/>',
 };
 const svg = (name) => `<svg viewBox="0 0 24 24">${ICONS[name] || ''}</svg>`;
@@ -553,10 +555,10 @@ function setMode(mode) {
   busyUI();
   $$('#modeSeg button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
   $('#composer').classList.toggle('direct', mode === 'direct');
-  const noAgy = mode === 'ai' && S.meta.agy === null && !S.meta.codex;
+  const noAgy = mode === 'ai' && S.meta.agy === null;
   $('#agyMissing').hidden = !noAgy;
   $('#chatEmpty').classList.toggle('dim', noAgy);
-  $('#prompt').placeholder = noAgy ? 'AI chat needs the AGY CLI or ChatGPT (Codex CLI) — see above, or switch to Direct mode'
+  $('#prompt').placeholder = noAgy ? 'AI chat needs the AGY CLI — see above, or switch to Direct mode'
     : mode === 'ai' ? 'Ask in any language — e.g. “sob server er node version check koro”' : 'Shell command to run on every target server — e.g. df -h /';
   updateComposerHint();
 }
@@ -573,9 +575,18 @@ function updateComposerHint() {
 function autoGrow() {
   const t = $('#prompt');
   t.style.height = 'auto';
-  t.style.height = Math.min(200, t.scrollHeight) + 'px';
+  const h = t.value ? t.scrollHeight : 0; // empty: one line, whatever the placeholder's length
+  t.style.height = h ? Math.min(200, h) + 'px' : '';
+  t.style.overflowY = h > 200 ? 'auto' : 'hidden'; // a scrollbar only when it is really needed
 }
 $('#prompt').addEventListener('input', autoGrow);
+window.addEventListener('resize', () => autoGrow());
+// text put in by the app (a draft, a suggestion, "ask again") resizes the box too
+const promptValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+Object.defineProperty($('#prompt'), 'value', {
+  get() { return promptValue.get.call(this); },
+  set(v) { promptValue.set.call(this, v); requestAnimationFrame(autoGrow); },
+});
 // Up / Down recall earlier prompts like a shell; only from the first / last line, so multi-line
 // editing keeps working. What was being typed comes back after the newest prompt.
 const recall = { list: store.get('promptHistory', []), pos: -1, draft: '' };
@@ -1032,7 +1043,7 @@ async function send() {
   const target = targetLabel();
   const user = userBubble({ mode: S.mode, text, target });
   if (S.mode === 'ai') {
-    if (S.meta.agy === null && !S.meta.codex) { $('#agyMissing').hidden = false; return toast('AI chat needs the AGY CLI or ChatGPT (Codex CLI) — install one first', 'bad'); }
+    if (S.meta.agy === null) { $('#agyMissing').hidden = false; return toast('AI chat needs the AGY CLI — install it first', 'bad'); }
     if (w.busy) return toast('The AI is still working in this window — wait, stop it, or open a new window (Alt+N)', 'bad');
     RW = w;
     w.log.appendChild(user);
@@ -1392,12 +1403,38 @@ function chatEvent(ev, replay) {
 }
 
 /* ================================================================ terminals */
-const TERM_THEME = {
+const TERM_DARK = {
   background: '#0b1019', foreground: '#dbe2ef', cursor: '#22d3ee', cursorAccent: '#0b1019',
   selectionBackground: 'rgba(99,102,241,0.45)',
   black: '#1b2130', red: '#f87171', green: '#34d399', yellow: '#fbbf24', blue: '#60a5fa', magenta: '#c084fc', cyan: '#22d3ee', white: '#dbe2ef',
   brightBlack: '#5b6478', brightRed: '#fca5a5', brightGreen: '#6ee7b7', brightYellow: '#fde68a', brightBlue: '#93c5fd', brightMagenta: '#d8b4fe', brightCyan: '#67e8f9', brightWhite: '#ffffff',
 };
+// light terminal: ANSI colours dark enough to read on white (yellow, cyan and "white" text too)
+const TERM_LIGHT = {
+  background: '#ffffff', foreground: '#1e293b', cursor: '#0891b2', cursorAccent: '#ffffff',
+  selectionBackground: 'rgba(99,102,241,0.22)',
+  black: '#1e293b', red: '#dc2626', green: '#047857', yellow: '#a16207', blue: '#1d4ed8', magenta: '#9333ea', cyan: '#0e7490', white: '#64748b',
+  brightBlack: '#64748b', brightRed: '#ef4444', brightGreen: '#059669', brightYellow: '#b45309', brightBlue: '#2563eb', brightMagenta: '#a855f7', brightCyan: '#0891b2', brightWhite: '#334155',
+};
+const termTheme = () => (document.documentElement.dataset.theme === 'dark' ? TERM_DARK : TERM_LIGHT);
+
+/* ================================================================ light / dark */
+function applyTheme(theme, save = true) {
+  theme = theme === 'dark' ? 'dark' : 'light';
+  const root = document.documentElement;
+  if (root.dataset.theme !== theme) {
+    document.body.classList.add('theme-anim');
+    root.dataset.theme = theme;
+    setTimeout(() => document.body.classList.remove('theme-anim'), 250);
+  }
+  store.set('theme', theme);
+  const btn = $('#btnTheme');
+  btn.innerHTML = icon(theme === 'dark' ? 'sun' : 'moon');
+  btn.title = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+  S.terms.forEach((t) => { t.term.options.theme = termTheme(); });
+  if (save) api('/api/ui', { theme }).catch(() => {}); // the app window's title bar follows
+}
+$('#btnTheme').onclick = () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
 
 function openTerminal(serverId, focus = true) {
   const s = S.servers.get(serverId);
@@ -1410,7 +1447,7 @@ function openTerminal(serverId, focus = true) {
     <div class="term-body"><div class="term-overlay"><div class="box"><div class="spinner"></div><div class="msg">Connecting to ${esc(s.name)}…</div></div></div></div>`;
   $('#terms').appendChild(pane);
   const term = new Terminal({
-    theme: TERM_THEME, fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, monospace', fontSize: 13.5, lineHeight: 1.15,
+    theme: termTheme(), fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, monospace', fontSize: 13.5, lineHeight: 1.15,
     cursorBlink: true, cursorStyle: 'bar', scrollback: 10000, allowProposedApi: true, macOptionIsMeta: true,
   });
   const fit = new FitAddon.FitAddon();
@@ -1750,8 +1787,8 @@ async function loadServers() {
   render();
 }
 
-// Which brain the chosen model runs on: ChatGPT models come from the Codex CLI, the rest from AGY.
-const brainName = () => (String(S.meta?.model || '').startsWith('chatgpt:') ? 'ChatGPT' : 'AGY');
+// The AI brain: every model runs on the AGY CLI.
+const brainName = () => 'AGY';
 
 const AUTO = 'auto';
 const options = (list) => list.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('');
@@ -1836,6 +1873,7 @@ async function restoreWins() {
 }
 
 async function boot() {
+  applyTheme(document.documentElement.dataset.theme, false); // the button shows the other mode
   hydrateIcons();
   for (const saved of store.get('wins', [])) if (saved?.id && S.wins.size < MAX_WINS) makeWin(saved);
   if (!S.wins.size) makeWin({ id: 'main' });
@@ -1845,8 +1883,9 @@ async function boot() {
   try {
     await loadServers();
     S.meta = await api('/api/meta');
+    if (S.meta.theme && S.meta.theme !== document.documentElement.dataset.theme) applyTheme(S.meta.theme, false);
     $('#modelName').textContent = S.meta.model || 'AI';
-    const brains = [S.meta.agy && 'AGY', S.meta.codex && 'ChatGPT'].filter(Boolean);
+    const brains = [S.meta.agy && 'AGY'].filter(Boolean);
     $('#brandSub').textContent = `v${S.meta.version} · ${brains.length ? brains.join(' + ') : 'AI'} brain${brains.length ? '' : ' (not found)'}`;
     if (!brains.length) {
       $('#modelPill .pulse').style.background = 'var(--bad)';

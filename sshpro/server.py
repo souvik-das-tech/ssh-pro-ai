@@ -20,7 +20,7 @@ from sshpro import __version__
 from sshpro.agy import AGY_INSTALL_URL, AIError, agy_available
 from sshpro.codex import codex_available
 from sshpro.backup import export_backup, import_backup
-from sshpro.brain import Windows
+from sshpro.brain import Brain, Windows
 from sshpro.db import Database
 from sshpro.importer import import_termix
 from sshpro.paths import TERMIX_DB, WEB_DIR, data_dir
@@ -33,6 +33,11 @@ AUDIT_DAYS = 5
 CHAT_DAYS = 15
 
 
+def ui_theme() -> str:
+    """The UI theme the user picked: "light" (default) or "dark"."""
+    return "dark" if Brain._load_settings().get("theme") == "dark" else "light"
+
+
 class Backend:
     def __init__(self, db: Database, token: str | None = None):
         self.db = db
@@ -43,6 +48,7 @@ class Backend:
         self.brain = self.windows.main
         self._tasks: set[asyncio.Task] = set()
         self.errors: dict[int, str] = {}  # last connection error per server (not persisted)
+        self.on_theme = None  # the desktop window follows the UI's light / dark choice (title bar)
 
     # ---- plumbing ------------------------------------------------------------------------
 
@@ -88,6 +94,7 @@ class Backend:
         r.add_post("/api/backup/import", self.backup_import)
         r.add_get("/api/audit", self.audit)
         r.add_post("/api/open", self.open_url)
+        r.add_post("/api/ui", self.set_ui)
         r.add_post("/api/exec", self.exec_direct)
         r.add_post("/api/ai/ask", self.ai_ask)
         r.add_post("/api/ai/approve", self.ai_approve)
@@ -147,6 +154,7 @@ class Backend:
             "agy_install_url": AGY_INSTALL_URL, "data_dir": str(data_dir()),
             "termix_db": str(TERMIX_DB) if TERMIX_DB.is_file() else None, "ssh_exe": shutil.which("ssh"),
             "chat": self.brain.chat, "chat_days": CHAT_DAYS, "windows": self.windows.state(),
+            "theme": ui_theme(),
         })
 
     # ---- servers -------------------------------------------------------------------------
@@ -223,6 +231,16 @@ class Backend:
 
     async def audit(self, request: web.Request) -> web.Response:
         return web.json_response(self.db.list_audit(int(request.query.get("limit", 300))))
+
+    async def set_ui(self, request: web.Request) -> web.Response:
+        """UI preferences kept in settings.json: the light / dark theme."""
+        theme = str((await request.json()).get("theme") or "")
+        if theme not in ("light", "dark"):
+            raise ValueError("theme must be light or dark")
+        self.brain._save_settings(theme=theme)
+        if self.on_theme is not None:
+            self.on_theme(theme)
+        return web.json_response({"ok": True, "theme": theme})
 
     async def open_url(self, request: web.Request) -> web.Response:
         url = str((await request.json()).get("url") or "")

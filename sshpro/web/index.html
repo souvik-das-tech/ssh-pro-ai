@@ -7,6 +7,11 @@
   <link rel="icon" href="/static/icon.png">
   <link rel="stylesheet" href="/static/vendor/xterm.css">
   <link rel="stylesheet" href="/static/app.css">
+  <script>
+    // theme before the first paint: the last choice, light by default
+    try { document.documentElement.dataset.theme = JSON.parse(localStorage.getItem('sshpro.theme')) === 'dark' ? 'dark' : 'light'; }
+    catch { document.documentElement.dataset.theme = 'light'; }
+  </script>
 </head>
 <body>
 <div class="app">
@@ -18,6 +23,7 @@
         <div class="brand-name">SSH Pro <span class="grad">AI</span></div>
         <div class="brand-sub" id="brandSub">fleet control · AI brain</div>
       </div>
+      <button class="btn btn-ghost btn-icon btn-sm theme-btn" id="btnTheme" title="Switch to dark mode"><span class="i" data-icon="moon"></span></button>
     </div>
 
     <div class="search">
@@ -109,7 +115,7 @@
           </div>
         </div>
         <div class="grow"></div>
-        <span class="model-pill" id="modelPill" title="AI model (live list from AGY and ChatGPT / Codex)"><span class="pulse"></span><span id="modelName">AI</span><select id="modelSel" hidden></select></span>
+        <span class="model-pill" id="modelPill" title="AI model (live list from AGY)"><span class="pulse"></span><span id="modelName">AI</span><select id="modelSel" hidden></select></span>
         <span class="model-pill auto-pill" id="autoPill" hidden title="Auto: quick checks and chat use the Fast model; troubleshooting, security, changes and long requests use the Smart model"><span>Fast</span><select id="autoFast"></select><span>Smart</span><select id="autoSmart"></select></span>
         <span class="fav-wrap">
           <button class="btn btn-ghost btn-sm" id="btnFavs" title="Favorite chats — reopen one with its servers selected"><span class="i" data-icon="star"></span>Favorites</button>
@@ -124,12 +130,12 @@
           <div class="empty" id="chatEmpty">
             <div class="empty-orb"><span class="i" data-icon="sparkles"></span></div>
             <h2>Ask anything about your fleet</h2>
-            <p>The AI (AGY or ChatGPT) plans the commands, SSH Pro AI runs them on every target server in parallel and brings back one clear answer. Anything that changes a server waits for your approval.</p>
+            <p>The AI (AGY) plans the commands, SSH Pro AI runs them on every target server in parallel and brings back one clear answer. Anything that changes a server waits for your approval.</p>
             <div class="suggest" id="suggest"></div>
           </div>
           <div class="agy-missing" id="agyMissing" hidden>
-            <div class="agy-missing-head"><span class="i" data-icon="sparkles"></span><h3>AI chat needs the AGY CLI or ChatGPT</h3></div>
-            <p>The AI chat runs on the Antigravity CLI (<code>agy</code>) installed on this computer, and it was not found (nor the ChatGPT Codex CLI — install it and run <code>codex login</code> to use ChatGPT instead). Everything else works without it: servers, terminals and <b>Direct</b> mode commands.</p>
+            <div class="agy-missing-head"><span class="i" data-icon="sparkles"></span><h3>AI chat needs the AGY CLI</h3></div>
+            <p>The AI chat runs on the Antigravity CLI (<code>agy</code>) installed on this computer, and it was not found. Everything else works without it: servers, terminals and <b>Direct</b> mode commands.</p>
             <ol>
               <li>Install it — PowerShell: <code>irm https://antigravity.google/install.ps1 | iex</code> &nbsp;or&nbsp; <code>winget install Google.AntigravityCLI</code></li>
               <li>Open a new terminal, run <code>agy</code> once and sign in</li>

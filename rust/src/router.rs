@@ -30,9 +30,9 @@ pub const LONG_REQUEST: usize = 220; // characters; long requests usually carry 
 
 /// Defaults when the user has not picked models for Auto: the first available match wins.
 pub const FAST_PREFERENCE: &[&str] =
-    &[r"gemini.*flash.*low", r"gemini.*flash.*medium", r"chatgpt:gpt-5\.6-luna", r"flash", r"luna"];
+    &[r"gemini.*flash.*low", r"gemini.*flash.*medium", r"flash"];
 pub const SMART_PREFERENCE: &[&str] =
-    &[r"chatgpt:gpt-6", r"claude-sonnet", r"claude-opus", r"gemini.*flash.*high", r"terra"];
+    &[r"claude-sonnet", r"claude-opus", r"gemini.*pro", r"gemini.*flash.*high"];
 
 /// ("fast" | "smart", reason) for one user request.
 pub fn classify(prompt: &str) -> (&'static str, &'static str) {

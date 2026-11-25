@@ -47,7 +47,7 @@ Share that one `Setup.exe`. Whoever runs it gets a normal Windows app:
 
 Uninstalling removes the app but keeps the user's data (`%LOCALAPPDATA%\SSH-Pro-AI`). Every user
 has their own servers, keys and chats; nothing of yours is inside the installer. The AI chat needs
-the AGY CLI or the Codex CLI on each user's PC (the app shows how to install them).
+the AGY CLI on each user's PC (the app shows how to install it).
 
 The setup is not code-signed, so Windows SmartScreen shows "Windows protected your PC" the first
 time: **More info > Run anyway**. Signing `sshpro.exe` and the setup with a code-signing
@@ -55,7 +55,7 @@ certificate removes that warning.
 
 Tests: `cargo test` in `rust\` (with gcc on PATH). They cover the safety classifier (every case of
 the Python suite), secret masking, the database, backups, the Termix import, the tar.gz folder
-transfer, Codex reply parsing, the HTTP token guard, and the AI job loop with a scripted AI
+transfer, the HTTP token guard, and the AI job loop with a scripted AI
 (answers, approvals, rejections, Stop, results going back to the AI).
 
 ## Modules
@@ -71,13 +71,18 @@ Each Python module has a Rust counterpart with the same behaviour:
 | `sshpool.rs` | `sshpool.py` | russh connection pool: commands, probe, shells, SFTP, tar.gz folder transfers, server-to-server copy/pipe, trust-on-first-use host keys. |
 | `safety.rs`, `shlex.rs` | `safety.py` | Read-only allowlist, sudo wrapping, secret masking; Python-exact `shlex`. |
 | `brain.rs` | `brain.py` | AI loop, approvals, canary rollout, chat windows, Auto routing. |
-| `agy.rs`, `codex.rs` | `agy.py`, `codex.py` | AGY CLI and ChatGPT (Codex CLI) adapters; the AI only plans. |
+| `agy.rs` | `agy.py` | AGY CLI adapter; the AI only plans. |
 | `router.rs` | `router.py` | Auto fast/smart model choice. |
 | `localexec.rs` | `localexec.py` | PowerShell steps on this PC. |
 | `backup.rs`, `importer.rs` | `backup.py`, `importer.py` | `.sshpro` backup and Termix import. |
 | `instructions.txt` | `brain.INSTRUCTIONS` | The AI's standing instructions, byte for byte. |
 
 ## Differences from the Python app
+
+- **AI brain**: AGY only. The ChatGPT (Codex CLI) brain of the Python app is not included; a
+  ChatGPT model saved in the settings by the Python app is ignored and an AGY model is used.
+- **Light / dark mode**: light by default; the sun / moon button next to the logo switches it. The
+  choice is saved in `settings.json` and the window's title bar follows it.
 
 - **Host keys**: a server has several host keys (RSA, Ed25519, ECDSA). The app asks for RSA first,
   which is what the Python app negotiated and saved, so existing fingerprints keep matching. If a

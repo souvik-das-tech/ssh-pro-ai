@@ -25,8 +25,7 @@ use tokio::sync::{broadcast, Semaphore};
 
 use crate::agy::{agy_available, AGY_INSTALL_URL};
 use crate::backup::{export_backup, import_backup};
-use crate::brain::{BrainError, Emit, Windows};
-use crate::codex::codex_available;
+use crate::brain::{load_settings, save_settings, BrainError, Emit, Windows};
 use crate::db::Database;
 use crate::importer::import_termix;
 use crate::paths::{data_dir, termix_db, which};
@@ -48,6 +47,13 @@ pub struct Backend {
     pub windows: Windows,
     events: broadcast::Sender<String>,
     errors: Mutex<HashMap<i64, String>>, // last connection error per server (not persisted)
+    /// the desktop window follows the UI's light / dark choice (title bar colour)
+    on_theme: Mutex<Option<Box<dyn Fn(&str) + Send + Sync>>>,
+}
+
+/// The UI theme the user picked: "light" (default) or "dark".
+pub fn ui_theme() -> &'static str {
+    if load_settings().get("theme").and_then(Value::as_str) == Some("dark") { "dark" } else { "light" }
 }
 
 /// `{"error": ...}` with status 400 (403 for a bad token), like the Python backend.
@@ -216,7 +222,11 @@ impl Backend {
             let _ = sender.send(event.to_string());
         });
         let windows = Windows::new(db.clone(), ssh.clone(), emit); // chat windows that work at the same time
-        Arc::new(Self { db, token, ssh, windows, events, errors: Mutex::new(HashMap::new()) })
+        Arc::new(Self { db, token, ssh, windows, events, errors: Mutex::new(HashMap::new()), on_theme: Mutex::new(None) })
+    }
+
+    pub fn set_theme_listener(&self, listener: impl Fn(&str) + Send + Sync + 'static) {
+        *self.on_theme.lock().unwrap() = Some(Box::new(listener));
     }
 
     fn emit(&self, event: Value) {
@@ -237,6 +247,7 @@ impl Backend {
             .route("/api/backup/import", post(backup_import))
             .route("/api/audit", get(audit))
             .route("/api/open", post(open_url))
+            .route("/api/ui", post(set_ui))
             .route("/api/exec", post(exec_direct))
             .route("/api/ai/ask", post(ai_ask))
             .route("/api/ai/approve", post(ai_approve))
@@ -359,10 +370,11 @@ async fn meta(State(app): App) -> ApiResult {
     let termix = termix_db();
     Ok(Json(json!({
         "version": env!("CARGO_PKG_VERSION"), "model": app.windows.main.model(), "agy": agy_available(),
-        "codex": codex_available(), "agy_install_url": AGY_INSTALL_URL, "data_dir": data_dir().to_string_lossy(),
+        "agy_install_url": AGY_INSTALL_URL, "data_dir": data_dir().to_string_lossy(),
         "termix_db": termix.is_file().then(|| termix.to_string_lossy().into_owned()),
         "ssh_exe": which("ssh").map(|p| p.to_string_lossy().into_owned()),
         "chat": app.windows.main.chat(), "chat_days": CHAT_DAYS, "windows": app.windows.state(),
+        "theme": ui_theme(),
     })))
 }
 
@@ -462,6 +474,19 @@ pub fn open_in_browser(url: &str) -> bool {
             .spawn();
     }
     true
+}
+
+/// UI preferences kept in settings.json: the light / dark theme.
+async fn set_ui(State(app): App, raw: Bytes) -> ApiResult {
+    let theme = val_str(body(&raw)?.get("theme"));
+    if theme != "light" && theme != "dark" {
+        return Err(bad("theme must be light or dark"));
+    }
+    save_settings(&[("theme", json!(theme))]);
+    if let Some(listener) = app.on_theme.lock().unwrap().as_ref() {
+        listener(&theme);
+    }
+    Ok(Json(json!({"ok": true, "theme": theme})))
 }
 
 async fn open_url(raw: Bytes) -> ApiResult {

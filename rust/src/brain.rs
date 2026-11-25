@@ -1,4 +1,4 @@
-//! The AI bot: the local AGY CLI (or ChatGPT through Codex) plans, this app executes on the servers
+//! The AI bot: the local AGY CLI plans, this app executes on the servers
 //! (and on this PC: local PowerShell steps, uploads and downloads), the AI analyses the results.
 //!
 //! The AI never runs anything itself. Every round it returns one JSON object; read-only steps run at
@@ -17,7 +17,6 @@ use tokio::sync::{oneshot, Semaphore};
 use tokio::task::{AbortHandle, JoinHandle};
 
 use crate::agy::{agy_available, AgyProvider, AiError, AGY_INSTALL_URL};
-use crate::codex::{self, CodexProvider};
 use crate::db::{Database, Server};
 use crate::localexec::run_local;
 use crate::paths::{data_dir, home_dir};
@@ -49,11 +48,7 @@ pub fn default_model() -> String {
 }
 
 pub fn no_brain() -> String {
-    format!(
-        "AI chat needs the AGY CLI ({AGY_INSTALL_URL}) or the Codex CLI signed in with ChatGPT ({}). \
-         Install one, then restart the app.",
-        codex::CODEX_INSTALL_URL
-    )
+    format!("AI chat needs the AGY CLI ({AGY_INSTALL_URL}). Install it, then restart the app.")
 }
 
 static ANSI: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07|\r").unwrap());
@@ -176,7 +171,6 @@ fn compact(v: &Value) -> String {
 #[derive(Clone)]
 pub enum Provider {
     Agy(Arc<AgyProvider>),
-    Codex(Arc<CodexProvider>),
     #[cfg(test)]
     Script(Arc<tests::ScriptProvider>),
 }
@@ -185,7 +179,6 @@ impl Provider {
     async fn start(&self, instructions: &str) -> Result<(), AiError> {
         match self {
             Provider::Agy(p) => p.start(instructions).await,
-            Provider::Codex(p) => p.start(instructions).await,
             #[cfg(test)]
             Provider::Script(_) => Ok(()),
         }
@@ -194,7 +187,6 @@ impl Provider {
     async fn ask(&self, message: &str) -> Result<String, AiError> {
         match self {
             Provider::Agy(p) => p.ask(message).await,
-            Provider::Codex(p) => p.ask(message).await,
             #[cfg(test)]
             Provider::Script(p) => p.ask(message),
         }
@@ -203,7 +195,6 @@ impl Provider {
     async fn reset(&self) {
         match self {
             Provider::Agy(p) => p.reset().await,
-            Provider::Codex(p) => p.reset().await,
             #[cfg(test)]
             Provider::Script(_) => {}
         }
@@ -212,15 +203,16 @@ impl Provider {
     async fn close(&self) {
         match self {
             Provider::Agy(p) => p.close().await,
-            Provider::Codex(p) => p.close().await,
             #[cfg(test)]
             Provider::Script(_) => {}
         }
     }
 
     async fn after_cancel(&self) {
-        if let Provider::Agy(p) = self {
-            p.after_cancel().await;
+        match self {
+            Provider::Agy(p) => p.after_cancel().await,
+            #[cfg(test)]
+            Provider::Script(_) => {}
         }
     }
 }
@@ -475,7 +467,7 @@ pub struct Brain {
     factory: Option<Factory>,
 }
 
-fn load_settings() -> Map<String, Value> {
+pub fn load_settings() -> Map<String, Value> {
     std::fs::read_to_string(data_dir().join(SETTINGS_FILE))
         .ok()
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
@@ -483,7 +475,7 @@ fn load_settings() -> Map<String, Value> {
         .unwrap_or_default()
 }
 
-fn save_settings(changes: &[(&str, Value)]) {
+pub fn save_settings(changes: &[(&str, Value)]) {
     let mut data = load_settings();
     for (k, v) in changes {
         data.insert((*k).into(), v.clone());
@@ -492,7 +484,8 @@ fn save_settings(changes: &[(&str, Value)]) {
 }
 
 fn setting(settings: &Map<String, Value>, key: &str) -> Option<String> {
-    settings.get(key).and_then(Value::as_str).filter(|s| !s.is_empty()).map(String::from)
+    // ChatGPT models saved by an older version are dropped: the AI is AGY only
+    settings.get(key).and_then(Value::as_str).filter(|s| !s.is_empty() && !s.starts_with("chatgpt:")).map(String::from)
 }
 
 impl Brain {
@@ -608,30 +601,12 @@ impl Brain {
 
     // ---- model choice --------------------------------------------------------------------
 
-    /// Live lists from `agy models` and the Codex (ChatGPT) catalog; new models appear without a
-    /// code change. A brain that is missing or fails only drops out of the list.
+    /// Live list from `agy models`; new models appear without a code change.
     pub async fn models(&self) -> Result<Vec<Value>, BrainError> {
-        let mut sources: Vec<BoxFuture<'static, Result<Vec<Value>, AiError>>> = Vec::new();
-        if agy_available().is_some() {
-            sources.push(crate::agy::list_models().boxed());
-        }
-        if codex::codex_available().is_some() {
-            sources.push(codex::list_models().boxed());
-        }
-        if sources.is_empty() {
+        if agy_available().is_none() {
             return Err(BrainError::Runtime(no_brain()));
         }
-        let results = futures::future::join_all(sources).await;
-        let models: Vec<Value> = results.iter().filter_map(|r| r.as_ref().ok()).flatten().cloned().collect();
-        if models.is_empty() {
-            let err = results.into_iter().find_map(|r| r.err()).unwrap();
-            return Err(err.into());
-        }
-        for r in &results {
-            if let Err(e) = r {
-                tracing::warn!("Model list failed: {e}");
-            }
-        }
+        let models = crate::agy::list_models().await?;
         self.st().labels = models
             .iter()
             .map(|m| (val_str(m.get("id")), val_str(m.get("label"))))
@@ -704,20 +679,12 @@ impl Brain {
         if st.model != AUTO {
             return st.model.clone();
         }
-        st.auto_fast.clone().unwrap_or_else(|| {
-            if agy_available().is_some() { FAST_FALLBACK.into() } else { format!("{}gpt-5.6-luna", codex::PREFIX) }
-        })
+        st.auto_fast.clone().unwrap_or_else(|| FAST_FALLBACK.into())
     }
 
     fn label(&self) -> String {
         let model = self.current();
-        if let Some(l) = self.st().labels.get(&model) {
-            return l.clone();
-        }
-        match model.strip_prefix(codex::PREFIX) {
-            Some(slug) => format!("ChatGPT · {slug}"),
-            None => model,
-        }
+        self.st().labels.get(&model).cloned().unwrap_or(model)
     }
 
     async fn close_provider(self: &Arc<Self>) {
@@ -768,19 +735,14 @@ impl Brain {
         if let Some(f) = &self.factory {
             return Ok(f(&model));
         }
-        if codex::is_chatgpt(&model) {
-            return Ok(Provider::Codex(Arc::new(CodexProvider::new(&model, codex::codex_workspace())?)));
-        }
         Ok(Provider::Agy(AgyProvider::new(&model, crate::agy::agy_workspace())?))
     }
 
-    /// The AI chat needs the local AGY CLI or the Codex CLI (ChatGPT); everything else in the app
-    /// works without them.
+    /// The AI chat needs the local AGY CLI; everything else in the app works without it.
     pub fn available(&self) -> bool {
         self.factory.is_some()
             || self.provider.lock().unwrap().is_some()
             || agy_available().is_some()
-            || codex::codex_available().is_some()
     }
 
     pub fn warm_up(self: &Arc<Self>) {

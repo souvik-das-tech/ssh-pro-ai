@@ -9,7 +9,6 @@
 mod agy;
 mod backup;
 mod brain;
-mod codex;
 mod crypto;
 mod db;
 mod importer;
@@ -31,6 +30,15 @@ use crate::paths::{db_path, logs_dir};
 use crate::server::Backend;
 
 const TITLE: &str = "SSH Pro AI";
+
+/// Messages to the window's event loop.
+#[derive(Debug)]
+enum UserEvent {
+    /// another start of the app: come to the front
+    Show,
+    /// the UI switched theme (true = dark)
+    Theme(bool),
+}
 
 fn setup_logging() -> tracing_appender::non_blocking::WorkerGuard {
     use tracing_subscriber::prelude::*;
@@ -145,27 +153,41 @@ fn run_window(port: u16) -> ExitCode {
     };
     tracing::info!("SSH Pro AI {} (Rust) on {}", env!("CARGO_PKG_VERSION"), url.split('?').next().unwrap_or(""));
 
-    let event_loop = EventLoopBuilder::<()>::with_user_event().build();
+    let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
     win::watch_show_signal(show_signal, move || {
-        let _ = proxy.send_event(());
+        let _ = proxy.send_event(UserEvent::Show);
     });
+    let proxy = event_loop.create_proxy();
+    backend.set_theme_listener(move |theme| {
+        let _ = proxy.send_event(UserEvent::Theme(theme == "dark"));
+    });
+    let mut dark = server::ui_theme() == "dark";
 
+    // 1480 x 920, but never bigger than the screen without the taskbar (at 125 % scaling a
+    // 1080p screen is only 1536 x ~830), and centred on it
+    let scale = event_loop.primary_monitor().map(|m| m.scale_factor()).unwrap_or(1.0);
+    let (wx, wy, ww, wh) = win::work_area().unwrap_or((0, 0, (1480.0 * scale) as i32, (920.0 * scale) as i32));
+    let frame = 40.0 * scale; // title bar + borders, outside the inner size
+    let width = (1480.0 * scale).min(ww as f64 * 0.94);
+    let height = (920.0 * scale).min(wh as f64 * 0.94 - frame);
     let window = WindowBuilder::new()
         .with_title(TITLE)
-        .with_inner_size(LogicalSize::new(1480.0, 920.0))
+        .with_inner_size(tao::dpi::PhysicalSize::new(width, height))
+        .with_position(tao::dpi::PhysicalPosition::new(wx as f64 + (ww as f64 - width) / 2.0,
+                                                       wy as f64 + (wh as f64 - height - frame) / 2.0))
         .with_min_inner_size(LogicalSize::new(980.0, 620.0))
-        .with_theme(Some(Theme::Dark))
+        .with_theme(Some(if dark { Theme::Dark } else { Theme::Light }))
         .with_window_icon(Icon::from_resource(1, None).ok())
         .build(&event_loop)
         .expect("window");
-    win::dark_title_bar(window.hwnd());
+    win::title_bar(window.hwnd(), dark);
 
     let origin = url.split("/?").next().unwrap_or("").to_string();
     let mut context = WebContext::new(Some(paths::data_dir().join("webview2")));
     let webview = WebViewBuilder::new_with_web_context(&mut context)
         .with_url(&url)
-        .with_background_color((11, 15, 23, 255))
+        .with_background_color(if dark { (11, 15, 23, 255) } else { (244, 246, 251, 255) })
         .with_clipboard(true)
         .with_devtools(cfg!(debug_assertions))
         .with_permission_handler(|kind| match kind {
@@ -224,11 +246,16 @@ fn run_window(port: u16) -> ExitCode {
         *control_flow = ControlFlow::Wait;
         let _keep = (&webview, &context);
         match event {
-            // tao re-applies its own frame theme while the window opens: set the dark caption after it
+            // tao re-applies its own frame theme while the window opens: set the caption after it
             Event::NewEvents(StartCause::Init) | Event::WindowEvent { event: WindowEvent::ThemeChanged(_), .. } => {
-                win::dark_title_bar(window.hwnd());
+                win::title_bar(window.hwnd(), dark);
             }
-            Event::UserEvent(()) => {
+            Event::UserEvent(UserEvent::Theme(is_dark)) => {
+                dark = is_dark;
+                window.set_theme(Some(if dark { Theme::Dark } else { Theme::Light }));
+                win::title_bar(window.hwnd(), dark);
+            }
+            Event::UserEvent(UserEvent::Show) => {
                 tracing::info!("Another start: bringing the window to the front");
                 window.set_minimized(false);
                 window.set_visible(true);
@@ -318,11 +345,21 @@ mod win {
         });
     }
 
-    pub fn dark_title_bar(hwnd: isize) {
+    /// The primary screen without the taskbar: (x, y, width, height) in physical pixels.
+    pub fn work_area() -> Option<(i32, i32, i32, i32)> {
+        use windows_sys::Win32::Foundation::RECT;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETWORKAREA};
+        let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        let ok = unsafe { SystemParametersInfoW(SPI_GETWORKAREA, 0, &mut r as *mut RECT as _, 0) };
+        (ok != 0 && r.right > r.left).then(|| (r.left, r.top, r.right - r.left, r.bottom - r.top))
+    }
+
+    /// Title bar in the app's colours: #0b0f17 (dark) or #f4f6fb (light).
+    pub fn title_bar(hwnd: isize, dark: bool) {
         use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
         // Windows 11: DWMWA_USE_IMMERSIVE_DARK_MODE = 20, DWMWA_CAPTION_COLOR = 35
-        let on: i32 = 1;
-        let color: u32 = 0x0017_0F0B; // COLORREF 0x00BBGGRR -> #0b0f17
+        let on: i32 = dark as i32;
+        let color: u32 = if dark { 0x0017_0F0B } else { 0x00FB_F6F4 }; // COLORREF 0x00BBGGRR
         unsafe {
             DwmSetWindowAttribute(hwnd as _, 20, &on as *const _ as _, 4);
             DwmSetWindowAttribute(hwnd as _, 35, &color as *const _ as _, 4);

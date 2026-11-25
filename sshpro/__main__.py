@@ -39,6 +39,7 @@ class BackendThread(threading.Thread):
         self.url = ""
         self.error: BaseException | None = None
         self.loop: asyncio.AbstractEventLoop | None = None
+        self.backend = None
         self._runner = None
 
     def run(self) -> None:
@@ -50,7 +51,7 @@ class BackendThread(threading.Thread):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
         try:
-            backend = Backend(Database(db_path()))
+            backend = self.backend = Backend(Database(db_path()))
             self._runner = web.AppRunner(backend.app(), access_log=None)
             self.loop.run_until_complete(self._runner.setup())
             site = web.TCPSite(self._runner, "127.0.0.1", self.port)
@@ -76,19 +77,20 @@ class BackendThread(threading.Thread):
         self.loop.call_soon_threadsafe(self.loop.stop)
 
 
-def dark_title_bar(hwnd: int) -> None:
+def title_bar(hwnd: int, dark: bool) -> None:
+    """Title bar in the app's colours: #0b0f17 (dark) or #f4f6fb (light)."""
     try:  # Windows 11: DWMWA_USE_IMMERSIVE_DARK_MODE = 20, DWMWA_CAPTION_COLOR = 35
         dwm = ctypes.windll.dwmapi
-        on = ctypes.c_int(1)
+        on = ctypes.c_int(1 if dark else 0)
         dwm.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(on), ctypes.sizeof(on))
-        color = ctypes.c_int(0x00170F0B)  # COLORREF 0x00BBGGRR -> #0b0f17
+        color = ctypes.c_int(0x00170F0B if dark else 0x00FBF6F4)  # COLORREF 0x00BBGGRR
         dwm.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(color), ctypes.sizeof(color))
     except Exception:
         pass
 
 
 def run_window(backend: BackendThread) -> int:
-    from PySide6.QtCore import QUrl
+    from PySide6.QtCore import QObject, QUrl, Signal
     from PySide6.QtGui import QColor, QIcon
     from PySide6.QtNetwork import QLocalServer, QLocalSocket
     from PySide6.QtWebEngineCore import QWebEngineSettings
@@ -126,10 +128,16 @@ def run_window(backend: BackendThread) -> int:
     window = QMainWindow()
     window.setWindowTitle("SSH Pro AI")
     window.setWindowIcon(icon)
-    window.resize(1480, 920)
+    # 1480 x 920, but never bigger than the screen without the taskbar, and centred on it
+    avail = app.primaryScreen().availableGeometry()
+    window.resize(min(1480, int(avail.width() * 0.94)), min(920, int(avail.height() * 0.94) - 40))  # 40: title bar
+    window.move(avail.x() + (avail.width() - window.width()) // 2, avail.y() + (avail.height() - window.height()) // 2)
     window.setMinimumSize(980, 620)
     view = QWebEngineView(window)
-    view.page().setBackgroundColor(QColor("#0b0f17"))
+    from sshpro.server import ui_theme
+
+    dark = ui_theme() == "dark"
+    view.page().setBackgroundColor(QColor("#0b0f17" if dark else "#f4f6fb"))
     settings = view.settings()
     settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard, True)
     settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanPaste, True)
@@ -158,8 +166,14 @@ def run_window(backend: BackendThread) -> int:
         window.activateWindow()
 
     single.newConnection.connect(bring_front)
+    class ThemeBridge(QObject):  # the backend thread asks; the Qt thread changes the title bar
+        changed = Signal(str)
+
+    bridge = ThemeBridge()
+    bridge.changed.connect(lambda theme: title_bar(int(window.winId()), theme == "dark"))
+    backend.backend.on_theme = bridge.changed.emit
     window.show()
-    dark_title_bar(int(window.winId()))
+    title_bar(int(window.winId()), dark)
     app.aboutToQuit.connect(backend.shutdown)
     return app.exec()
 
