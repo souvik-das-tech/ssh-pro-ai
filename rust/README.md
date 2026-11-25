@@ -30,6 +30,29 @@ rust\target\release\sshpro.exe              :: desktop window
 rust\target\release\sshpro.exe --serve      :: backend only; prints the URL to open in a browser
 ```
 
+## Installer (to share the app)
+
+```bat
+winget install JRSoftware.InnoSetup
+rust\installer.cmd        :: -> rust\target\installer\SSH-Pro-AI-Setup-<version>.exe (~6 MB)
+```
+
+Share that one `Setup.exe`. Whoever runs it gets a normal Windows app:
+
+- installs for the current user without admin rights (`%LOCALAPPDATA%\Programs\SSH Pro AI`), or
+  for all users if they choose so in the setup;
+- Start menu and desktop shortcuts, and an entry in **Settings > Apps** to uninstall;
+- installs the Microsoft Edge WebView2 Runtime first if the PC lacks it (downloaded from Microsoft);
+- running the setup of a newer version updates the app in place (it closes a running copy first).
+
+Uninstalling removes the app but keeps the user's data (`%LOCALAPPDATA%\SSH-Pro-AI`). Every user
+has their own servers, keys and chats; nothing of yours is inside the installer. The AI chat needs
+the AGY CLI or the Codex CLI on each user's PC (the app shows how to install them).
+
+The setup is not code-signed, so Windows SmartScreen shows "Windows protected your PC" the first
+time: **More info > Run anyway**. Signing `sshpro.exe` and the setup with a code-signing
+certificate removes that warning.
+
 Tests: `cargo test` in `rust\` (with gcc on PATH). They cover the safety classifier (every case of
 the Python suite), secret masking, the database, backups, the Termix import, the tar.gz folder
 transfer, Codex reply parsing, the HTTP token guard, and the AI job loop with a scripted AI
