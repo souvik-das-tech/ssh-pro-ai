@@ -1,6 +1,6 @@
 [package]
 name = "sshpro"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "SSH Pro AI desktop app (Rust): many SSH servers in one window, with an AI ops assistant"
 license = "MIT"
